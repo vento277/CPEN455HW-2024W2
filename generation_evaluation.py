@@ -26,9 +26,28 @@ def my_sample(model, gen_data_dir, sample_batch_size = 25, obs = (3,32,32), samp
     for label in my_bidict:
         print(f"Label: {label}")
         #generate images for each label, each label has 25 images
-        sample_t = sample(model, sample_batch_size, obs, sample_op)
+        label_id = my_bidict[label]
+        labels = torch.ones(sample_batch_size, dtype=torch.int64).to(next(model.parameters()).device) * label_id
+        sample_t = sample(model, sample_batch_size, obs, sample_op, labels)
         sample_t = rescaling_inv(sample_t)
         save_images(sample_t, os.path.join(gen_data_dir), label=label)
+
+        # sample_t = torch.zeros(sample_batch_size, *obs).to(next(model.parameters()).device)
+        # for i in range(32):
+        #     for j in range(32):
+        #         # Get intermediate features
+        #         features = []
+        #         out = model(sample_t)
+        #         for k, layer in enumerate(model.resnet_blocks[:2]):
+        #             features.append(layer(sample_t))
+                
+        #         # Fuse intermediate features
+        #         fused = torch.stack(features).mean(dim=0)
+        #         out = model.output_conv(fused)
+        #         sample_t[:, :, i, j] = sample_op(out)[:, :, i, j]
+        
+        # sample_t = rescaling_inv(sample_t)
+        # save_images(sample_t, os.path.join(gen_data_dir), label=label)
     pass
 # End of your code
 
@@ -50,8 +69,13 @@ if __name__ == "__main__":
     #TODO: Begin of your code
     #Load your model and generate images in the gen_data_dir, feel free to modify the model
     model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=5)
+    # model = PixelCNN(nr_resnet=3,  # Increased resnet blocks for more features
+    #             nr_filters=40, 
+    #             input_channels=3, 
+    #             nr_logistic_mix=5)
     model = model.to(device)
     model = model.eval()
+    model.load_state_dict(torch.load('models/conditional_pixelcnn.pth')) 
     #End of your code
     
     my_sample(model=model, gen_data_dir=gen_data_dir)

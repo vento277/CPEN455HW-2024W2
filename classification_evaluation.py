@@ -24,8 +24,23 @@ NUM_CLASSES = len(my_bidict)
 def get_label(model, model_input, device):
     # Write your code here, replace the random classifier with your trained model
     # and return the predicted label, which is a tensor of shape (batch_size,)
-    answer = model(model_input, device)
-    return answer
+
+    _, labels = model.infer_img(model_input, device)
+    return labels
+
+    # features = []
+    # x = model_input
+    
+    # # Get features from different layers
+    # for layer in model.resnet_blocks[:2]:  # Using first 2 residual blocks
+    #     x = layer(x)
+    #     features.append(x.mean(dim=(2,3)))  # Spatial average pooling
+    
+    # # Combine features through a simple fusion
+    # fused_features = torch.cat(features, dim=1)
+    # logits = model.final_conv(fused_features)  # Using final conv as classifier
+    # labels = torch.argmax(logits, dim=1)
+    # return labels
 # End of your code
 
 def classifier(model, data_loader, device):
@@ -68,7 +83,12 @@ if __name__ == '__main__':
 
     #TODO:Begin of your code
     #You should replace the random classifier with your trained model
-    model = random_classifier(NUM_CLASSES)
+    model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=5, num_classes=NUM_CLASSES)
+    # model = PixelCNN(nr_resnet=3,  # Increased resnet blocks for more features
+    #                 nr_filters=40, 
+    #                 input_channels=3, 
+    #                 nr_logistic_mix=5, 
+    #                 num_classes=NUM_CLASSES)
     #End of your code
     
     model = model.to(device)
