@@ -25,12 +25,19 @@ def get_label(model, model_input, device):
     # Write your code here, replace the random classifier with your trained model
     # and return the predicted label, which is a tensor of shape (batch_size,)
 
-    # Forward pass through the model
-    with torch.no_grad():
-        output = model(model_input)  # Model output is likely logits
-        # Get the predicted class (maximum probability)
-        labels = torch.argmax(output, dim=1)
-    return labels
+    num_classes = 4   
+    batch_size = model_input.size(0)
+    log_likelihood = torch.zeros(batch_size, num_classes, device=device)
+    
+    for c in range(num_classes):
+        labels = torch.full((batch_size,), c, dtype=torch.long, device=device)
+        model_output = model(model_input, labels)
+        nll = discretized_mix_logistic_classify(model_input, model_output) #I modified loss to give output for each picture
+        log_likelihood[:, c] = -nll  #negative log likelihood
+
+    # I'm now selecting the class with the highest log likelihood==>(lowest nll)
+    _, predicted_labels = log_likelihood.max(1)
+    return predicted_labels
 
     # features = []
     # x = model_input
