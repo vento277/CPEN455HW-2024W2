@@ -27,8 +27,22 @@ def get_label(model, model_input, device):
 
     # Forward pass through the model
     with torch.no_grad():
-        predicted_labels = model(model_input, device)
-    return predicted_labels
+        output = model(model_input, device)
+        
+        # If output is already a 1D tensor of class predictions, return it directly
+        if len(output.shape) == 1:
+            return output
+        
+        # If output is logits or has more dimensions, extract class predictions 
+        # This assumes the class dimension is dimension 1 (typical for classification outputs)
+        elif len(output.shape) > 1:
+            # Get the indices of maximum values along dimension 1
+            predicted_labels = torch.argmax(output, dim=1)
+            return predicted_labels
+        
+        else:
+            # Handle any other case
+            raise ValueError(f"Unexpected output shape from model: {output.shape}")
 
     # features = []
     # x = model_input
