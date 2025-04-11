@@ -25,8 +25,12 @@ def get_label(model, model_input, device):
     # Write your code here, replace the random classifier with your trained model
     # and return the predicted label, which is a tensor of shape (batch_size,)
 
-    answer, _ = model.classify(model_input, len(my_bidict))
-    return answer
+    # Forward pass through the model
+    with torch.no_grad():
+        output = model(model_input)  # Model output is likely logits
+        # Get the predicted class (maximum probability)
+        labels = torch.argmax(output, dim=1)
+    return labels
 
     # features = []
     # x = model_input
