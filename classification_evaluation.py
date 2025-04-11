@@ -21,42 +21,34 @@ import csv
 NUM_CLASSES = len(my_bidict)
 
 #TODO: Begin of your code
+# classification function to convert the output of conditional PixelCNN++ to the prediction labels when given a new image
+def classify(model, model_input, device):
+    batch_size = model_input.shape[0]
+
+    # replicate input for number of classes
+    model_input = model_input.repeat(NUM_CLASSES,1,1,1)
+
+    # lookup tensor of potential class labels that can be guessed for each image in the batch
+    # class label is repeated to match a batch of data; for parallel processing
+    # eg.) when batch_size=3, num_classes=4
+    # shape: ([0, 0, 0, 1, 1, 1, 2, 2, 2])
+    batched_labels = torch.arange(NUM_CLASSES).repeat_interleave(batch_size)
+    
+    # generate output for each class label
+    model_out = model(model_input, batched_labels)
+
+    # choice of loss function was given from piazza/ TA office hours
+    logits = discretized_mix_logistic_loss(model_input, model_out, sum_over_batch=False).view(NUM_CLASSES, batch_size).permute(1, 0)
+    
+    # minimize logistic loss
+    losses, pred_labels = torch.min(logits, dim=1)
+
+    return logits, losses, pred_labels
+
 def get_label(model, model_input, device):
-    # Write your code here, replace the random classifier with your trained model
-    # and return the predicted label, which is a tensor of shape (batch_size,)
-
-    # Forward pass through the model
-    with torch.no_grad():
-        output = model(model_input, device)
-        
-        # If output is already a 1D tensor of class predictions, return it directly
-        if len(output.shape) == 1:
-            return output
-        
-        # If output is logits or has more dimensions, extract class predictions 
-        # This assumes the class dimension is dimension 1 (typical for classification outputs)
-        elif len(output.shape) > 1:
-            # Get the indices of maximum values along dimension 1
-            predicted_labels = torch.argmax(output, dim=1)
-            return predicted_labels
-        
-        else:
-            # Handle any other case
-            raise ValueError(f"Unexpected output shape from model: {output.shape}")
-
-    # features = []
-    # x = model_input
-    
-    # # Get features from different layers
-    # for layer in model.resnet_blocks[:2]:  # Using first 2 residual blocks
-    #     x = layer(x)
-    #     features.append(x.mean(dim=(2,3)))  # Spatial average pooling
-    
-    # # Combine features through a simple fusion
-    # fused_features = torch.cat(features, dim=1)
-    # logits = model.final_conv(fused_features)  # Using final conv as classifier
-    # labels = torch.argmax(logits, dim=1)
-    # return labels
+    # changed to predicted
+    logits, losses, pred_labels = classify(model, model_input, device)
+    return pred_labels
 # End of your code
 
 def classifier(model, data_loader, device):
@@ -99,14 +91,9 @@ if __name__ == '__main__':
 
     #TODO:Begin of your code
     #You should replace the random classifier with your trained model
-    model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=5)
-    # model = PixelCNN(nr_resnet=3,  # Increased resnet blocks for more features
-    #                 nr_filters=40, 
-    #                 input_channels=3, 
-    #                 nr_logistic_mix=5, 
-    #                 num_classes=NUM_CLASSES)
+    model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=5, num_classes=NUM_CLASSES)
     #End of your code
-    
+
     model = model.to(device)
     #Attention: the path of the model is fixed to './models/conditional_pixelcnn.pth'
     #You should save your model to this path
