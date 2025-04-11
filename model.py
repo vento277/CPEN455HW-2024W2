@@ -96,6 +96,9 @@ class PixelCNN(nn.Module):
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
+        # Class embeddings
+        self.class_embedding = nn.Embedding(num_class, input_channels*32*32)
+
 
     def forward(self, x, sample=False):
         # similar as done in the tf repo :
