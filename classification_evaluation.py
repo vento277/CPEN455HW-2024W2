@@ -25,8 +25,8 @@ def get_label(model, model_input, device):
     # Write your code here, replace the random classifier with your trained model
     # and return the predicted label, which is a tensor of shape (batch_size,)
 
-    _, labels = model.infer_img(model_input, device)
-    return labels
+    answer, _ = model.classify(model_input, len(my_bidict))
+    return answer
 
     # features = []
     # x = model_input
