@@ -52,7 +52,7 @@ class PixelCNNLayer_down(nn.Module):
 
 class PixelCNN(nn.Module):
     def __init__(self, nr_resnet=5, nr_filters=80, nr_logistic_mix=10,
-                    resnet_nonlinearity='concat_elu', input_channels=3, num_class=4):
+                    resnet_nonlinearity='concat_elu', input_channels=3, num_classes=4):
         super(PixelCNN, self).__init__()
         if resnet_nonlinearity == 'concat_elu' :
             self.resnet_nonlinearity = lambda x : concat_elu(x)
@@ -97,7 +97,7 @@ class PixelCNN(nn.Module):
         self.init_padding = None
 
         # Class embeddings
-        self.class_embedding = nn.Embedding(num_class, input_channels*32*32)
+        self.class_embedding = nn.Embedding(num_classes, input_channels*32*32)
 
 
     def forward(self, x, sample=False):
