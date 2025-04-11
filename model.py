@@ -100,7 +100,7 @@ class PixelCNN(nn.Module):
         self.class_embedding = nn.Embedding(num_classes, input_channels*32*32)
 
 
-    def forward(self, x, sample=False):
+    def forward(self, x, labels, sample=False):
         # label embeddings are created then attached to the input
         labels = labels.to(x.device)
         label_embeddings = self.class_embedding(labels)

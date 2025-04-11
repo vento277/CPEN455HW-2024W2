@@ -249,7 +249,21 @@ if __name__ == '__main__':
         
         if epoch % args.sampling_interval == 0:
             print('......sampling......')
-            sample_t = sample(model, args.sample_batch_size, args.obs, sample_op)
+            # generate random labels to feed into samples
+            # rand_labels = torch.randint(low=0, high=len(my_bidict), size=(args.sample_batch_size,)).to(device=next(model.parameters()).device)
+            
+            # generate ordered labels for each class section
+            section_size = args.sample_batch_size // 4
+            ordered_labels = torch.cat([
+                torch.full((section_size,), 0, dtype=torch.long), 
+                torch.full((section_size,), 1, dtype=torch.long), 
+                torch.full((section_size,), 2, dtype=torch.long),  
+                torch.full((section_size,), 3, dtype=torch.long)   
+            ])
+
+            # added labels tensor as param
+            sample_t = sample(model, args.sample_batch_size, args.obs, sample_op, ordered_labels)
+            
             sample_t = rescaling_inv(sample_t)
             save_images(sample_t, args.sample_dir)
             sample_result = wandb.Image(sample_t, caption="epoch {}".format(epoch))
