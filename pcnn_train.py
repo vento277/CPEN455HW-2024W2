@@ -11,6 +11,7 @@ from dataset import *
 from tqdm import tqdm
 from pprint import pprint
 import argparse
+from classification_evaluation import classify
 from pytorch_fid.fid_score import calculate_fid_given_paths
 
 
@@ -22,17 +23,42 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
         
     deno =  args.batch_size * np.prod(args.obs) * np.log(2.)        
     loss_tracker = mean_tracker()
+
+    my_bidict = bidict({'Class0': 0, 
+                'Class1': 1,
+                'Class2': 2,
+                'Class3': 3})
     
+    # change from item to (model_input, labels) to iterate with labels 
     for batch_idx, item in enumerate(tqdm(data_loader)):
-        model_input, _ = item
+        
+        # fetch both model_input and category name from dataset item
+        model_input, category_names = item
         model_input = model_input.to(device)
-        model_output = model(model_input)
-        loss = loss_op(model_input, model_output)
-        loss_tracker.update(loss.item()/deno)
-        if mode == 'training':
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                
+        # create new tensor "categories"
+        if mode == 'training' or mode == 'val':
+            # convert category_name from tuple to a torch tensor
+            categories = torch.tensor([my_bidict[cat] for cat in category_names], dtype=torch.int64).to(device)
+            
+            # pass both inputs and labels to the model as param
+            model_output = model(model_input, categories)
+            loss = loss_op(model_input, model_output)
+            loss_tracker.update(loss.item()/deno)
+
+            if mode == 'training':
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+            
+        else:
+            # calculate loss during 'test'
+            logits, losses, pred_labels = classify(model, model_input, device)
+            loss_tracker.update(torch.sum(losses).item()/deno)
+
+        if args.en_wandb:
+            wandb.log({mode + "-Average-BPD" : loss_tracker.get_mean()})
+            wandb.log({mode + "-epoch": epoch})
         
     if args.en_wandb:
         wandb.log({mode + "-Average-BPD" : loss_tracker.get_mean()})

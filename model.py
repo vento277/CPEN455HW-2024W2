@@ -101,6 +101,13 @@ class PixelCNN(nn.Module):
 
 
     def forward(self, x, sample=False):
+        # label embeddings are created then attached to the input
+        labels = labels.to(x.device)
+        label_embeddings = self.class_embedding(labels)
+        label_embeddings = label_embeddings.view(-1, self.input_channels, 32, 32)
+        # label_embeddings = label_embeddings.expand(-1, -1, x.size(2), x.size(3))
+        x = x + label_embeddings
+    
         # similar as done in the tf repo :
         if self.init_padding is not sample:
             xs = [int(y) for y in x.size()]

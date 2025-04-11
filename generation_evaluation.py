@@ -17,10 +17,14 @@ import torch
 # Begin of your code
 sample_op = lambda x : sample_from_discretized_mix_logistic(x, 5)
 def my_sample(model, gen_data_dir, sample_batch_size = 25, obs = (3,32,32), sample_op = sample_op):
-    for label in my_bidict:
+    for label, id in my_bidict.items():
         print(f"Label: {label}")
         #generate images for each label, each label has 25 images
-        sample_t = sample(model, sample_batch_size, obs, sample_op)
+        
+        # generate labels as some tensor of ones
+        labels = torch.ones(sample_batch_size, dtype=torch.int64, device=device)*id
+        # added labels as param to sample
+        sample_t = sample(model, sample_batch_size, obs, sample_op, labels)
         sample_t = rescaling_inv(sample_t)
         save_images(sample_t, os.path.join(gen_data_dir), label=label)
     pass
