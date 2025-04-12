@@ -94,7 +94,7 @@ if __name__ == '__main__':
     
     dataset = CPEN455Dataset(root_dir=args.data_dir, mode=args.mode, transform=ds_transforms)
     #TODO:Begin of your code
-    model = PixelCNN(nr_resnet=2, nr_filters=100, input_channels=3, nr_logistic_mix=10, num_classes=NUM_CLASSES)
+    model = PixelCNN(nr_resnet=1, nr_filters=100, input_channels=3, nr_logistic_mix=10, num_classes=NUM_CLASSES)
     #End of your code
 
     model = model.to(device)
