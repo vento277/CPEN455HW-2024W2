@@ -60,9 +60,9 @@ def classifier(model, data_loader, device):
     # Save to CSV
     csv_path = os.path.join(os.path.dirname(__file__), 'classifier_results.csv')
     with open(csv_path, 'w', newline='') as csvfile:
-        csv_writer = csv.writer(csvfile, delimiter='|')
+        csv_writer = csv.writer(csvfile)
         # Write base filename and predicted label, no header
-        for image_path, pred in zip(data_loader.dataset.samples, all_preds):
+        for image_path, pred in zip(dataset.samples, all_preds):
             img_name = os.path.basename(image_path[0])
             csv_writer.writerow([img_name, pred])
     
