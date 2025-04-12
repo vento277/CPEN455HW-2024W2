@@ -14,24 +14,35 @@ NUM_CLASSES = len(my_bidict)
 
 # Write your code here
 # And get the predicted label, which is a tensor of shape (batch_size,)
-# Begin of your code
-def get_label(model, model_input, device):
+#TODO: Begin of your code
+# classification function to convert the output of conditional PixelCNN++ to the prediction labels when given a new image
+def classify(model, model_input, device):
     batch_size = model_input.shape[0]
-    best_loss = [float('inf')]*batch_size
-    best_ans = [0]*batch_size
-    logits = torch.zeros((4,batch_size), device=device)
-    for i in range(4):
-        curr_loss = discretized_mix_logistic_loss(model_input, model(model_input,[i]*batch_size),sum_batch=False)
-        logits[i] = curr_loss
-        for j in range(batch_size):
-            if curr_loss[j] < best_loss[j]:
-                best_ans[j] = i
-                best_loss[j] = curr_loss[j]
-    column_sums = torch.sum(logits, dim=0)
-    switched_logits = 1-logits/column_sums
-    new_column_sums = torch.sum(switched_logits, dim=0)
-    normalized_logits = switched_logits/new_column_sums
-    return torch.tensor(best_loss, device=device).detach(), torch.tensor(best_ans, device=device).detach(), torch.tensor(normalized_logits, device=device).detach()
+
+    # replicate input for number of classes
+    model_input = model_input.repeat(NUM_CLASSES,1,1,1)
+
+    # lookup tensor of potential class labels that can be guessed for each image in the batch
+    # class label is repeated to match a batch of data; for parallel processing
+    # eg.) when batch_size=3, num_classes=4
+    # shape: ([0, 0, 0, 1, 1, 1, 2, 2, 2])
+    batched_labels = torch.arange(NUM_CLASSES).repeat_interleave(batch_size)
+    
+    # generate output for each class label
+    model_out = model(model_input, batched_labels)
+
+    # choice of loss function was given from piazza/ TA office hours
+    logits = discretized_mix_logistic_loss(model_input, model_out, sum_over_batch=False).view(NUM_CLASSES, batch_size).permute(1, 0)
+    
+    # minimize logistic loss
+    losses, pred_labels = torch.min(logits, dim=1)
+
+    return logits, losses, pred_labels
+
+def get_label(model, model_input, device):
+    # changed to predicted
+    logits, losses, pred_labels = classify(model, model_input, device)
+    return pred_labels
 # End of your code
 
 def classifier(model, data_loader,dataset,device):
@@ -96,18 +107,21 @@ if __name__ == '__main__':
     #Write your code here
     #You should replace the random classifier with your trained model
     #Begin of your code
-    model = PixelCNN(nr_resnet=args.nr_resnet, nr_filters=args.nr_filters, 
-                input_channels=3, nr_logistic_mix=args.nr_logistic_mix)
+    model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=5, num_classes=NUM_CLASSES)
     #End of your code
     
     model = model.to(device)
-    model_name = 'models/' + args.model_name + '.pth'
-    model.load_state_dict(torch.load(model_name,map_location=torch.device(device)))
-    #Attention: the path of the model is fixed to 'models/conditional_pixelcnn.pth'
+    #Attention: the path of the model is fixed to './models/conditional_pixelcnn.pth'
     #You should save your model to this path
-    model.load_state_dict(torch.load(model_name,map_location=torch.device(device)))
+    model_path = os.path.join(os.path.dirname(__file__), 'models/conditional_pixelcnn.pth')
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path))
+        print('model parameters loaded')
+    else:
+        raise FileNotFoundError(f"Model file not found at {model_path}")
     model.eval()
-    classifier(model = model, data_loader = dataloader, dataset = dataset, device = device)
+    
+    acc = classifier(model = model, data_loader = dataloader, device = device)
 
     print('model test set stats saved')
         
