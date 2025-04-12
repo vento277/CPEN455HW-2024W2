@@ -41,9 +41,9 @@ def get_label(model, model_input, device):
 def classifier(model, data_loader, device):
     model.eval()
     acc_tracker = ratio_tracker()
-    # Lists to store predictions and original labels for CSV
+    # Lists to store predictions and image IDs
     all_preds = []
-    all_originals = []
+    all_image_ids = []
     
     for batch_idx, item in enumerate(tqdm(data_loader)):
         model_input, categories = item
@@ -54,28 +54,21 @@ def classifier(model, data_loader, device):
         correct_num = torch.sum(answer == original_label)
         acc_tracker.update(correct_num.item(), model_input.shape[0])
         
-        # Store predictions and original labels
+        # Store predictions
         all_preds.extend(answer.cpu().numpy().tolist())
-        all_originals.extend(original_label.cpu().numpy().tolist())
-    
-    # Calculate final accuracy
-    final_acc = acc_tracker.get_ratio()
+        # Assuming categories contains image paths like 'test/0000021.jpg'
+        all_image_ids.extend(categories)  # Adjust if paths are elsewhere in item
     
     # Save to CSV
     csv_path = os.path.join(os.path.dirname(__file__), 'classifier_results.csv')
     with open(csv_path, 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
-        # Write header
-        csv_writer.writerow(['Sample_Index', 'Predicted_Label', 'Original_Label'])
-        # Write predictions and original labels
-        for idx, (pred, orig) in enumerate(zip(all_preds, all_originals)):
-            csv_writer.writerow([idx, pred, orig])
-        # Write accuracy at the end
-        csv_writer.writerow([])
-        csv_writer.writerow(['Accuracy', final_acc])
+        # Write image ID and predicted label, no header
+        for image_id, pred in zip(all_image_ids, all_preds):
+            csv_writer.writerow([image_id, pred])
     
     print(f"Results saved to {csv_path}")
-    return final_acc
+    return acc_tracker.get_ratio()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
