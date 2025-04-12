@@ -41,9 +41,8 @@ def get_label(model, model_input, device):
 def classifier(model, data_loader, device):
     model.eval()
     acc_tracker = ratio_tracker()
-    # Lists to store predictions and image IDs
+    # List to store predictions
     all_preds = []
-    all_image_ids = []
     
     for batch_idx, item in enumerate(tqdm(data_loader)):
         model_input, categories = item
@@ -60,11 +59,12 @@ def classifier(model, data_loader, device):
     # Save to CSV
     csv_path = os.path.join(os.path.dirname(__file__), 'classifier_results.csv')
     with open(csv_path, 'w', newline='') as csvfile:
-        csv_writer = csv.writer(csvfile)
-        # Write base filename and predicted label, no header
-        for image_path, pred in zip(dataset.samples, all_preds):
-            img_name = os.path.basename(image_path[0])
-            csv_writer.writerow([img_name, pred])
+        csv_writer = csv.writer(csvfile, delimiter='|')
+        # Write relative path and predicted label, no header
+        for image_path, pred in zip(data_loader.dataset.samples, all_preds):
+            # Get path relative to root_dir (e.g., test/0000021.jpg)
+            img_path = os.path.relpath(image_path[0], start=data_loader.dataset.root_dir)
+            csv_writer.writerow([img_path, pred])
     
     print(f"Results saved to {csv_path}")
     return acc_tracker.get_ratio()
