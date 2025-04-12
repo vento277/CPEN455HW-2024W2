@@ -187,11 +187,8 @@ class PixelCNN(nn.Module):
         spatial_cond = self.spatial_mapper(label_embeddings)  # [batch_size, 32*32]
         spatial_cond = spatial_cond.view(batch_size, 1, 32, 32)  # [batch_size, 1, 32, 32]
         
-        # FIXED: Store original x's channel size before concatenation
-        original_x = x  # Preserve the original input
-        
         # Concatenate spatial conditioning
-        x = torch.cat([x, spatial_cond], dim=1)
+        x = x + spatial_cond.expand_as(x)
         
         # similar as done in the tf repo :
         if self.init_padding is not sample:
