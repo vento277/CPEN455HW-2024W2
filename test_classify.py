@@ -56,16 +56,15 @@ def classifier(model, data_loader, device):
         
         # Store predictions
         all_preds.extend(answer.cpu().numpy().tolist())
-        # Assuming categories contains image paths like 'test/0000021.jpg'
-        all_image_ids.extend(categories)  # Adjust if paths are elsewhere in item
     
     # Save to CSV
     csv_path = os.path.join(os.path.dirname(__file__), 'classifier_results.csv')
     with open(csv_path, 'w', newline='') as csvfile:
-        csv_writer = csv.writer(csvfile)
-        # Write image ID and predicted label, no header
-        for image_id, pred in zip(all_image_ids, all_preds):
-            csv_writer.writerow([image_id, pred])
+        csv_writer = csv.writer(csvfile, delimiter='|')
+        # Write base filename and predicted label, no header
+        for image_path, pred in zip(data_loader.dataset.samples, all_preds):
+            img_name = os.path.basename(image_path[0])
+            csv_writer.writerow([img_name, pred])
     
     print(f"Results saved to {csv_path}")
     return acc_tracker.get_ratio()
