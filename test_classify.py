@@ -106,5 +106,5 @@ if __name__ == '__main__':
         raise FileNotFoundError(f"Model file not found at {model_path}")
     model.eval()
     
-    acc = classifier(model=model, data_loader=dataloader, device=device)
+    acc = classifier(model = model, data_loader = dataloader, dataset = dataset, device = device)
     print(f"Accuracy: {acc}")
