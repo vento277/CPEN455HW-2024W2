@@ -71,6 +71,7 @@ if __name__ == '__main__':
         rescaling
     ])
     dataset_list = ['train', 'validation', 'test']
+    my_bidict['Unknown'] = -1
     
     for mode in dataset_list:
         print(f"Mode: {mode}")
