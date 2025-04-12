@@ -118,12 +118,12 @@ class PixelCNN(nn.Module):
         self.attention = SelfAttention(nr_filters)
 
         # Changed: Simplified initial convolutions to handle input directly
-        self.u_init = down_shifted_conv2d(input_channels, nr_filters, filter_size=(2,3),
+        self.u_init = down_shifted_conv2d(input_channels+1, nr_filters, filter_size=(2,3),
                                          shift_output_down=True)
         self.ul_init = nn.ModuleList([
-            down_shifted_conv2d(input_channels, nr_filters, filter_size=(1,3),
+            down_shifted_conv2d(input_channels+1, nr_filters, filter_size=(1,3),
                                shift_output_down=True),
-            down_right_shifted_conv2d(input_channels, nr_filters, filter_size=(2,1),
+            down_right_shifted_conv2d(input_channels+1, nr_filters, filter_size=(2,1),
                                     shift_output_right=True)
         ])
 
