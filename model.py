@@ -154,6 +154,22 @@ class PixelCNN(nn.Module):
 
         return x_out
     
+        # Run model inference
+    def infer_img(self, x, device):
+        B, _, _, _ = x.size()
+        inferred_loss = torch.zeros((self.num_classes, B)).to(device)
+
+        # Get the loss for each class
+        for i in range(self.num_classes):
+            # Run the model with each inferred label to get the loss
+            inferred_label = (torch.ones(B, dtype=torch.int64) * i).to(device)
+            model_output = self(x, inferred_label)
+            inferred_loss[i] = discretized_mix_logistic_loss(x, model_output, True)
+
+        # Get the minimum loss and the corresponding label
+        losses, labels = torch.min(inferred_loss, dim=0)
+        return losses, labels, inferred_loss
+    
     
 class random_classifier(nn.Module):
     def __init__(self, NUM_CLASSES):
