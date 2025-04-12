@@ -194,20 +194,25 @@ class PixelCNN(nn.Module):
         spatial_cond = self.spatial_mapper(label_embeddings)  # [batch_size, 32*32]
         spatial_cond = spatial_cond.view(batch_size, 1, 32, 32)  # [batch_size, 1, 32, 32]
         
+        # Adjust input channels to 4
+        if spatial_cond.shape[2:] != x.shape[2:]:
+            spatial_cond = F.interpolate(spatial_cond, size=x.shape[2:], mode='nearest')
+
         # Combine the input with spatial conditioning
-        x = torch.cat([x, spatial_cond], dim=1)
+        x_conditioned = torch.cat([x, spatial_cond], dim=1)  # Concat along channel dimension
     
         # similar as done in the tf repo :
-        if self.init_padding is not sample:
-            xs = [int(y) for y in x.size()]
-            padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
-            self.init_padding = padding.cuda() if x.is_cuda else padding
-
-        if sample :
+        if sample:
             xs = [int(y) for y in x.size()]
             padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
             padding = padding.cuda() if x.is_cuda else padding
-            x = torch.cat((x, padding), 1)
+            x_conditioned = torch.cat((x_conditioned, padding), 1)
+        else:
+            if self.init_padding is None:
+                xs = [int(y) for y in x.size()]
+                self.init_padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
+                self.init_padding = self.init_padding.cuda() if x.is_cuda else self.init_padding
+            x_conditioned = torch.cat((x_conditioned, self.init_padding), 1)
 
         ### UP PASS ###
         u_list = [self.u_init(x)]
