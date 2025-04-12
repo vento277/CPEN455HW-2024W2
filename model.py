@@ -85,14 +85,12 @@ class PixelCNN(nn.Module):
         else:
             raise Exception('right now only concat elu is supported as resnet nonlinearity.')
 
-        # Increase model capacity
-        self.nr_filters = 128  # Increased from 80
-        self.nr_resnet = 8     # Increased from 5
+        self.nr_filters = nr_filters
         self.num_classes = num_classes
         self.input_channels = input_channels
-        self.nr_logistic_mix = 12  # Slightly increased for better distribution modeling
+        self.nr_logistic_mix = nr_logistic_mix
         self.right_shift_pad = nn.ZeroPad2d((1, 0, 0, 0))
-        self.down_shift_pad = nn.ZeroPad2d((0, 0, 1, 0))
+        self.down_shift_pad  = nn.ZeroPad2d((0, 0, 1, 0))
 
         down_nr_resnet = [self.nr_resnet] + [self.nr_resnet + 1] * 2
         self.down_layers = nn.ModuleList([PixelCNNLayer_down(down_nr_resnet[i], self.nr_filters,
@@ -134,8 +132,8 @@ class PixelCNN(nn.Module):
                                       down_right_shifted_conv2d(input_channels + 1, self.nr_filters,
                                             filter_size=(2,1), shift_output_right=True)])
 
-        num_mix = 3 if self.input_channels == 1 else 12
-        self.nin_out = nin(self.nr_filters, num_mix * self.nr_logistic_mix)
+        num_mix = 3 if self.input_channels == 1 else 10
+        self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
         # Enhanced spatial conditioning
