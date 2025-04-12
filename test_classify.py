@@ -62,7 +62,7 @@ def classifier(model, data_loader, device):
     with open(csv_path, 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         # Write base filename and predicted label, no header
-        for image_path, pred in zip(dataset.samples, all_preds):
+        for image_path, pred in zip(data_loader.dataset.samples,        for image_path, pred in zip(dataset.samples, all_preds):
             img_name = os.path.basename(image_path[0])
             csv_writer.writerow([img_name, pred])
     
@@ -78,10 +78,7 @@ if __name__ == '__main__':
                         default=32, help='Batch size for inference')
     parser.add_argument('-m', '--mode', type=str,
                         default='test', help='Mode for the dataset')
-    
-    args = parser.parse_args()
-    pprint(args.__dict__)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+.device("cuda" if torch.cuda.is_available() else "cpu")
     kwargs = {'num_workers':0, 'pin_memory':True, 'drop_last':False}
 
     ds_transforms = transforms.Compose([transforms.Resize((32, 32)), rescaling])
