@@ -117,13 +117,13 @@ class PixelCNN(nn.Module):
         self.cond_norm = ConditionalNorm(nr_filters, self.embedding_dim)
         self.attention = SelfAttention(nr_filters)
 
-        # Changed: Simplified initial convolutions to handle input directly
-        self.u_init = down_shifted_conv2d(input_channels+1, nr_filters, filter_size=(2,3),
+        # Fixed: Ensure initial convolutions expect exactly input_channels (3)
+        self.u_init = down_shifted_conv2d(input_channels, nr_filters, filter_size=(2,3),
                                          shift_output_down=True)
         self.ul_init = nn.ModuleList([
-            down_shifted_conv2d(input_channels+1, nr_filters, filter_size=(1,3),
+            down_shifted_conv2d(input_channels, nr_filters, filter_size=(1,3),
                                shift_output_down=True),
-            down_right_shifted_conv2d(input_channels+1, nr_filters, filter_size=(2,1),
+            down_right_shifted_conv2d(input_channels, nr_filters, filter_size=(2,1),
                                     shift_output_right=True)
         ])
 
@@ -131,32 +131,16 @@ class PixelCNN(nn.Module):
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Changed: Simplified spatial conditioning to project to nr_filters
-        self.spatial_mapper = nn.Sequential(
-            nn.Linear(self.embedding_dim, nr_filters),
-            nn.ReLU(),
-            nn.Linear(nr_filters, nr_filters)
-        )
-
     def forward(self, x, labels, sample=False):
         batch_size = x.size(0)
         labels = labels.to(x.device)
         label_embeddings = self.class_embedding(labels)
         channel_cond = self.condition_projection(label_embeddings)
 
-        # Changed: Apply spatial conditioning as modulation rather than channel concatenation
-        spatial_cond = self.spatial_mapper(label_embeddings).view(batch_size, self.nr_filters, 1, 1)
-
+        # Fixed: Removed sample padding to avoid adding extra channel
         if self.init_padding is not sample:
             xs = [int(y) for y in x.size()]
-            padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
-            self.init_padding = padding.cuda() if x.is_cuda else padding
-
-        if sample:
-            xs = [int(y) for y in x.size()]
-            padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
-            padding = padding.cuda() if x.is_cuda else padding
-            x = torch.cat((x, padding), 1)
+            self.init_padding = None  # No padding added
 
         u_list = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
@@ -170,8 +154,8 @@ class PixelCNN(nn.Module):
             u_list[-1] = self.cond_norm(u_list[-1], label_embeddings)
             ul_list[-1] = self.cond_norm(ul_list[-1], label_embeddings)
             if i == 1:
-                u_list[-1] = self.attention(u_list[-1]) * spatial_cond
-                ul_list[-1] = self.attention(ul_list[-1]) * spatial_cond
+                u_list[-1] = self.attention(u_list[-1])
+                ul_list[-1] = self.attention(ul_list[-1])
 
         u = u_list.pop()
         ul = ul_list.pop()
