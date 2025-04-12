@@ -85,6 +85,21 @@ class PixelCNN(nn.Module):
         self.upsize_ul_stream = nn.ModuleList([down_right_shifted_deconv2d(nr_filters,
                                                     nr_filters, stride=(2,2)) for _ in range(2)])
 
+
+        # Modified: Add embedding dimension parameter to make it more effective
+        self.embedding_dim = 128  # Added embedding dimension
+        
+        # Modified: Add class embedding with higher dimensions for better conditioning
+        self.class_embedding = nn.Embedding(num_classes, self.embedding_dim)
+        
+        # Modified: Add conditioning networks to better integrate the class information
+        self.condition_projection = nn.Sequential(
+            nn.Linear(self.embedding_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, nr_filters)
+        )
+
+       # Modified: Changed input channels to account for conditioning
         self.u_init = down_shifted_conv2d(input_channels + 1, nr_filters, filter_size=(2,3),
                         shift_output_down=True)
 
@@ -93,25 +108,50 @@ class PixelCNN(nn.Module):
                                        down_right_shifted_conv2d(input_channels + 1, nr_filters,
                                             filter_size=(2,1), shift_output_right=True)])
 
+        # self.u_init = down_shifted_conv2d(input_channels + 1, nr_filters, filter_size=(2,3),
+        #                 shift_output_down=True)
+
+        # self.ul_init = nn.ModuleList([down_shifted_conv2d(input_channels + 1, nr_filters,
+        #                                     filter_size=(1,3), shift_output_down=True),
+        #                                down_right_shifted_conv2d(input_channels + 1, nr_filters,
+        #                                     filter_size=(2,1), shift_output_right=True)])
+
         num_mix = 3 if self.input_channels == 1 else 10
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Class embeddings
-        self.class_embedding = nn.Embedding(num_classes, input_channels*32*32)
+        # # Class embeddings
+        # self.class_embedding = nn.Embedding(num_classes, input_channels*32*32)
 
-    # Add the embeddings to the input
-    def addPositionalEmbedding(self, x, labels, img_height, img_width):
-        embs = self.embedding(labels).view(-1, self.input_channels, img_height, img_width)
-        return x + embs
+                # Modified: Add spatial condition mapper to create a spatial condition tensor
+        self.spatial_mapper = nn.Sequential(
+            nn.Linear(self.embedding_dim, 32*32),
+            nn.ReLU()
+        )
 
     def forward(self, x, labels, sample=False):
         # label embeddings are created then attached to the input
-        labels = labels.to(x.device)
-        label_embeddings = self.class_embedding(labels)
-        label_embeddings = label_embeddings.view(-1, self.input_channels, 32, 32)
+        # labels = labels.to(x.device)
+        # label_embeddings = self.class_embedding(labels)
+        # label_embeddings = label_embeddings.view(-1, self.input_channels, 32, 32)
         # label_embeddings = label_embeddings.expand(-1, -1, x.size(2), x.size(3))
-        x = x + label_embeddings
+        # x = x + label_embeddings
+
+        # Modified: Improved class conditioning with more effective embedding
+        batch_size = x.size(0)
+        
+        # Get class embeddings
+        label_embeddings = self.class_embedding(labels)  # [batch_size, embedding_dim]
+        
+        # Project embeddings to channel dimension for feature-wise conditioning
+        channel_cond = self.condition_projection(label_embeddings)  # [batch_size, nr_filters]
+        
+        # Create spatial conditioning map
+        spatial_cond = self.spatial_mapper(label_embeddings)  # [batch_size, 32*32]
+        spatial_cond = spatial_cond.view(batch_size, 1, 32, 32)  # [batch_size, 1, 32, 32]
+        
+        # Combine the input with spatial conditioning
+        x = torch.cat([x, spatial_cond], dim=1)  # [batch_size, input_channels+1, 32, 32]
     
         # similar as done in the tf repo :
         if self.init_padding is not sample:
@@ -153,6 +193,14 @@ class PixelCNN(nn.Module):
                 u  = self.upsize_u_stream[i](u)
                 ul = self.upsize_ul_stream[i](ul)
 
+        # x_out = self.nin_out(F.elu(ul))
+
+        # assert len(u_list) == len(ul_list) == 0, pdb.set_trace()
+
+        # return x_out
+    
+        # Modified: Apply final conditioning before output
+        ul = ul + channel_cond.unsqueeze(2).unsqueeze(3)
         x_out = self.nin_out(F.elu(ul))
 
         assert len(u_list) == len(ul_list) == 0, pdb.set_trace()
