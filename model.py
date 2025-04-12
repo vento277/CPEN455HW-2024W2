@@ -60,6 +60,7 @@ class PixelCNN(nn.Module):
             raise Exception('right now only concat elu is supported as resnet nonlinearity.')
 
         self.nr_filters = nr_filters
+        self.num_classes = num_classes
         self.input_channels = input_channels
         self.nr_logistic_mix = nr_logistic_mix
         self.right_shift_pad = nn.ZeroPad2d((1, 0, 0, 0))
@@ -99,6 +100,10 @@ class PixelCNN(nn.Module):
         # Class embeddings
         self.class_embedding = nn.Embedding(num_classes, input_channels*32*32)
 
+    # Add the embeddings to the input
+    def addPositionalEmbedding(self, x, labels, img_height, img_width):
+        embs = self.embedding(labels).view(-1, self.input_channels, img_height, img_width)
+        return x + embs
 
     def forward(self, x, labels, sample=False):
         # label embeddings are created then attached to the input

@@ -11,7 +11,7 @@ from dataset import *
 from tqdm import tqdm
 from pprint import pprint
 import argparse
-from classification_evaluation import classify
+from classification_evaluation import *
 from pytorch_fid.fid_score import calculate_fid_given_paths
 
 
@@ -148,7 +148,7 @@ if __name__ == '__main__':
     #Reminder: if you have patience to read code line by line, you should notice this comment. here is the reason why we set num_workers to 0:
     #In order to avoid pickling errors with the dataset on different machines, we set num_workers to 0.
     #If you are using ubuntu/linux/colab, and find that loading data is too slow, you can set num_workers to 1 or even bigger.
-    kwargs = {'num_workers':0, 'pin_memory':True, 'drop_last':True}
+    kwargs = {'num_workers':1, 'pin_memory':True, 'drop_last':True}
 
     # set data
     if "mnist" in args.dataset:
@@ -247,6 +247,10 @@ if __name__ == '__main__':
                       epoch = epoch,
                       mode = 'val')
         
+        val_accuracy = classifier(model, val_loader, device)
+        if args.en_wandb:
+          wandb.log({"Validation Accuracy": val_accuracy, "epoch": epoch + 1})
+
         if epoch % args.sampling_interval == 0:
             print('......sampling......')
             # generate random labels to feed into samples
@@ -281,6 +285,8 @@ if __name__ == '__main__':
                 wandb.log({"samples": sample_result,
                             "FID": fid_score})
         
+
+
         if (epoch + 1) % args.save_interval == 0: 
             if not os.path.exists("models"):
                 os.makedirs("models")
