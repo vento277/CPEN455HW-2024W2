@@ -21,7 +21,7 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
     else:
         model.eval()
         
-    deno =  args.batch_size * np.prod(args.obs) * np.log(2.)        
+    deno = args.batch_size * np.prod(args.obs) * np.log(2.)        
     loss_tracker = mean_tracker()
 
     my_bidict = bidict({'Class0': 0, 
@@ -29,7 +29,7 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
                 'Class2': 2,
                 'Class3': 3})
     
-    # change from item to (model_input, labels) to iterate with labels 
+    # iterate through the dataloader to get both inputs and labels
     for batch_idx, item in enumerate(tqdm(data_loader)):
         
         # fetch both model_input and category name from dataset item
@@ -52,8 +52,8 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
                 optimizer.step()
             
         else:
-            # calculate loss during 'test'
-            logits, losses, pred_labels = classify(model, model_input, device)
+            # For test mode, use the model's infer_img method
+            losses, pred_labels, inferred_loss = model.infer_img(model_input, device)
             loss_tracker.update(torch.sum(losses).item()/deno)
 
         if args.en_wandb:
@@ -63,6 +63,26 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
     if args.en_wandb:
         wandb.log({mode + "-Average-BPD" : loss_tracker.get_mean()})
         wandb.log({mode + "-epoch": epoch})
+
+
+# Modified sampling function to handle conditional generation
+def sample(model, sample_size, obs, sample_op, condition_labels=None):
+    """
+    Sample images from model with optional conditioning on labels
+    """
+    model.eval()
+    if condition_labels is None:
+        # If no labels provided, use random labels
+        condition_labels = torch.randint(0, model.num_classes, (sample_size,))
+    
+    condition_labels = condition_labels.to(next(model.parameters()).device)
+    
+    # Use the model's sample method for conditional generation
+    with torch.no_grad():
+        samples = model.sample(condition_labels, next(model.parameters()).device, img_size=obs)
+        
+    return samples
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -206,8 +226,13 @@ if __name__ == '__main__':
     loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake)
     sample_op = lambda x : sample_from_discretized_mix_logistic(x, args.nr_logistic_mix)
 
+    # Number of classes for the conditional model (4 for the CPEN455 dataset)
+    num_classes = 4
+    
+    # Create the conditional PixelCNN model
     model = PixelCNN(nr_resnet=args.nr_resnet, nr_filters=args.nr_filters, 
-                input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix)
+                input_channels=input_channels, nr_logistic_mix=args.nr_logistic_mix,
+                num_classes=num_classes)
     model = model.to(device)
 
     if args.load_params:
@@ -249,19 +274,14 @@ if __name__ == '__main__':
         
         if epoch % args.sampling_interval == 0:
             print('......sampling......')
-            # generate random labels to feed into samples
-            # rand_labels = torch.randint(low=0, high=len(my_bidict), size=(args.sample_batch_size,)).to(device=next(model.parameters()).device)
-            
-            # generate ordered labels for each class section
-            section_size = args.sample_batch_size // 4
+            # Generate ordered labels for each class section
+            section_size = args.sample_batch_size // num_classes
             ordered_labels = torch.cat([
-                torch.full((section_size,), 0, dtype=torch.long), 
-                torch.full((section_size,), 1, dtype=torch.long), 
-                torch.full((section_size,), 2, dtype=torch.long),  
-                torch.full((section_size,), 3, dtype=torch.long)   
-            ])
+                torch.full((section_size,), i, dtype=torch.long) 
+                for i in range(num_classes)
+            ]).to(device)
 
-            # added labels tensor as param
+            # Sample images conditioned on the labels
             sample_t = sample(model, args.sample_batch_size, args.obs, sample_op, ordered_labels)
             
             sample_t = rescaling_inv(sample_t)
@@ -279,10 +299,9 @@ if __name__ == '__main__':
                 
             if args.en_wandb:
                 wandb.log({"samples": sample_result,
-                            "FID": fid_score})
+                           "FID": fid_score})
         
         if (epoch + 1) % args.save_interval == 0: 
             if not os.path.exists("models"):
                 os.makedirs("models")
-            torch.save(model.state_dict(), 'models/conditional_pixelcnn.pth'.format(model_name, epoch))
-            # torch.save(model.state_dict(), 'models/{}_{}.pth'.format(model_name, epoch))
+            torch.save(model.state_dict(), 'models/conditional_pixelcnn.pth')

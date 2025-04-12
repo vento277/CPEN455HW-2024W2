@@ -1,4 +1,8 @@
 import torch.nn as nn
+import torch
+from torch.autograd import Variable
+import torch.nn.functional as F
+import os
 from layers import *
 
 
@@ -64,6 +68,8 @@ class PixelCNN(nn.Module):
         self.nr_logistic_mix = nr_logistic_mix
         self.right_shift_pad = nn.ZeroPad2d((1, 0, 0, 0))
         self.down_shift_pad  = nn.ZeroPad2d((0, 0, 1, 0))
+        # Added to track number of classes for conditioning
+        self.num_classes = num_classes
 
         down_nr_resnet = [nr_resnet] + [nr_resnet + 1] * 2
         self.down_layers = nn.ModuleList([PixelCNNLayer_down(down_nr_resnet[i], nr_filters,
@@ -84,6 +90,7 @@ class PixelCNN(nn.Module):
         self.upsize_ul_stream = nn.ModuleList([down_right_shifted_deconv2d(nr_filters,
                                                     nr_filters, stride=(2,2)) for _ in range(2)])
 
+        # Modified to account for conditional input (input_channels + 1) where +1 is for the padding
         self.u_init = down_shifted_conv2d(input_channels + 1, nr_filters, filter_size=(2,3),
                         shift_output_down=True)
 
@@ -96,17 +103,34 @@ class PixelCNN(nn.Module):
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Class embeddings
-        self.class_embedding = nn.Embedding(num_classes, input_channels*32*32)
+        # Modified: Class conditioning approach - using embeddings
+        # Using embedding size that matches input dimensions for easy addition
+        embedding_dim = input_channels * 32 * 32  # Assuming 32x32 images
+        self.class_embedding = nn.Embedding(num_classes, embedding_dim)
+        
+        # Added: Condition network to process label embeddings
+        self.condition_network = nn.Sequential(
+            nn.Linear(embedding_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, input_channels * 32 * 32)
+        )
 
 
     def forward(self, x, labels, sample=False):
-        # label embeddings are created then attached to the input
+        # Modified: Enhanced conditional mechanism
+        # Generate label embeddings
         labels = labels.to(x.device)
+        batch_size = x.shape[0]
+        
+        # Get embeddings for each class and process them
         label_embeddings = self.class_embedding(labels)
-        label_embeddings = label_embeddings.view(-1, self.input_channels, 32, 32)
-        # label_embeddings = label_embeddings.expand(-1, -1, x.size(2), x.size(3))
-        x = x + label_embeddings
+        # Process embeddings through condition network
+        condition_features = self.condition_network(label_embeddings)
+        # Reshape to match input dimensions
+        condition_features = condition_features.view(batch_size, self.input_channels, 32, 32)
+        
+        # Apply conditioning by adding to input (feature-wise conditioning)
+        x = x + condition_features
     
         # similar as done in the tf repo :
         if self.init_padding is not sample:
@@ -114,7 +138,7 @@ class PixelCNN(nn.Module):
             padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
             self.init_padding = padding.cuda() if x.is_cuda else padding
 
-        if sample :
+        if sample:
             xs = [int(y) for y in x.size()]
             padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
             padding = padding.cuda() if x.is_cuda else padding
@@ -144,7 +168,7 @@ class PixelCNN(nn.Module):
             u, ul = self.down_layers[i](u, ul, u_list, ul_list)
 
             # upscale (only twice)
-            if i != 2 :
+            if i != 2:
                 u  = self.upsize_u_stream[i](u)
                 ul = self.upsize_ul_stream[i](ul)
 
@@ -154,8 +178,12 @@ class PixelCNN(nn.Module):
 
         return x_out
     
-        # Run model inference
+    # Modified: Enhanced inference method for classification
     def infer_img(self, x, device):
+        """
+        Perform inference to find the most likely class for an image
+        by computing the loss under each possible class condition.
+        """
         B, _, _, _ = x.size()
         inferred_loss = torch.zeros((self.num_classes, B)).to(device)
 
@@ -164,13 +192,35 @@ class PixelCNN(nn.Module):
             # Run the model with each inferred label to get the loss
             inferred_label = (torch.ones(B, dtype=torch.int64) * i).to(device)
             model_output = self(x, inferred_label)
-            inferred_loss[i] = discretized_mix_logistic_loss(x, model_output, True)
+            inferred_loss[i] = discretized_mix_logistic_loss(x, model_output, reduction=True)
 
         # Get the minimum loss and the corresponding label
         losses, labels = torch.min(inferred_loss, dim=0)
         return losses, labels, inferred_loss
     
+    # Added: Sampling method for conditional generation
+    def sample(self, condition_labels, device, img_size=(3, 32, 32)):
+        """
+        Sample images from the model conditioned on class labels
+        """
+        # Start with random noise or zeros
+        batch_size = condition_labels.shape[0]
+        x = torch.zeros(batch_size, *img_size).to(device)
+        
+        # Iteratively sample each pixel (this is slow but conceptually simple)
+        for h in range(img_size[1]):
+            for w in range(img_size[2]):
+                for c in range(img_size[0]):
+                    # Get the model's prediction
+                    out = self(x, condition_labels, sample=True)
+                    # Sample from the predicted distribution for this pixel
+                    x_sample = sample_from_discretized_mix_logistic(out, self.nr_logistic_mix)
+                    # Update just this pixel
+                    x[:, c, h, w] = x_sample[:, c, h, w]
+        
+        return x
     
+
 class random_classifier(nn.Module):
     def __init__(self, NUM_CLASSES):
         super(random_classifier, self).__init__()
@@ -178,10 +228,8 @@ class random_classifier(nn.Module):
         self.fc = nn.Linear(3, NUM_CLASSES)
         print("Random classifier initialized")
         # create a folder
-        if os.path.join(os.path.dirname(__file__), 'models') not in os.listdir():
+        if 'models' not in os.listdir(os.path.dirname(__file__)):
             os.mkdir(os.path.join(os.path.dirname(__file__), 'models'))
         torch.save(self.state_dict(), os.path.join(os.path.dirname(__file__), 'models/conditional_pixelcnn.pth'))
     def forward(self, x, device):
         return torch.randint(0, self.NUM_CLASSES, (x.shape[0],)).to(device)
-    
-    

@@ -21,34 +21,23 @@ import csv
 NUM_CLASSES = len(my_bidict)
 
 #TODO: Begin of your code
-# classification function to convert the output of conditional PixelCNN++ to the prediction labels when given a new image
-def classify(model, model_input, device):
-    batch_size = model_input.shape[0]
-
-    # replicate input for number of classes
-    model_input = model_input.repeat(NUM_CLASSES,1,1,1)
-
-    # lookup tensor of potential class labels that can be guessed for each image in the batch
-    # class label is repeated to match a batch of data; for parallel processing
-    # eg.) when batch_size=3, num_classes=4
-    # shape: ([0, 0, 0, 1, 1, 1, 2, 2, 2])
-    batched_labels = torch.arange(NUM_CLASSES).repeat_interleave(batch_size)
-    
-    # generate output for each class label
-    model_out = model(model_input, batched_labels)
-
-    # choice of loss function was given from piazza/ TA office hours
-    logits = discretized_mix_logistic_loss(model_input, model_out, sum_over_batch=False).view(NUM_CLASSES, batch_size).permute(1, 0)
-    
-    # minimize logistic loss
-    losses, pred_labels = torch.min(logits, dim=1)
-
-    return logits, losses, pred_labels
-
+# Write your code here
+# And get the predicted label, which is a tensor of shape (batch_size,)
+# Begin of your code
 def get_label(model, model_input, device):
-    # changed to predicted
-    logits, losses, pred_labels = classify(model, model_input, device)
-    return pred_labels
+    num_classes = 4   
+    batch_size = model_input.size(0)
+    log_likelihood = torch.zeros(batch_size, num_classes, device=device)
+    
+    for c in range(num_classes):
+        labels = torch.full((batch_size,), c, dtype=torch.long, device=device)
+        model_output = model(model_input, labels)
+        nll = discretized_mix_logistic_classify(model_input, model_output) #I modified loss to give output for each picture
+        log_likelihood[:, c] = -nll  #negative log likelihood
+
+    # I'm now selecting the class with the highest log likelihood==>(lowest nll)
+    _, predicted_labels = log_likelihood.max(1)
+    return predicted_labels
 # End of your code
 
 def classifier(model, data_loader, device):
@@ -57,7 +46,8 @@ def classifier(model, data_loader, device):
     for batch_idx, item in enumerate(tqdm(data_loader)):
         model_input, categories = item
         model_input = model_input.to(device)
-        original_label = [my_bidict[item] for item in categories]
+        # original_label = [my_bidict[item] for item in categories]
+        original_label = [item for item in categories]
         original_label = torch.tensor(original_label, dtype=torch.int64).to(device)
         answer = get_label(model, model_input, device)
         correct_num = torch.sum(answer == original_label)
@@ -79,7 +69,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     pprint(args.__dict__)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    kwargs = {'num_workers':0, 'pin_memory':True, 'drop_last':False}
+    kwargs = {'num_workers':1, 'pin_memory':True, 'drop_last':True}
 
     ds_transforms = transforms.Compose([transforms.Resize((32, 32)), rescaling])
     dataloader = torch.utils.data.DataLoader(CPEN455Dataset(root_dir=args.data_dir, 
@@ -89,22 +79,19 @@ if __name__ == '__main__':
                                              shuffle=True, 
                                              **kwargs)
 
-    #TODO:Begin of your code
+    #Write your code here
     #You should replace the random classifier with your trained model
-    model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=5, num_classes=NUM_CLASSES)
+    #Begin of your code
+    model = PixelCNN(nr_resnet=1, nr_filters=60, nr_logistic_mix=5, input_channels=3, num_classes=4)
+    model.load_state_dict(torch.load('models/conditional_pixelcnn.pth'))
     #End of your code
 
     model = model.to(device)
-    #Attention: the path of the model is fixed to './models/conditional_pixelcnn.pth'
+    #Attention: the path of the model is fixed to 'models/conditional_pixelcnn.pth'
     #You should save your model to this path
-    model_path = os.path.join(os.path.dirname(__file__), 'models/conditional_pixelcnn.pth')
-    if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path))
-        print('model parameters loaded')
-    else:
-        raise FileNotFoundError(f"Model file not found at {model_path}")
+    model.load_state_dict(torch.load('conditional_pixelcnn.pth'))
     model.eval()
-    
+    print('model parameters loaded')
     acc = classifier(model = model, data_loader = dataloader, device = device)
     print(f"Accuracy: {acc}")
         
