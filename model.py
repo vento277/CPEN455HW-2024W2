@@ -123,7 +123,7 @@ class PixelCNN(nn.Module):
         # # Class embeddings
         # self.class_embedding = nn.Embedding(num_classes, input_channels*32*32)
 
-                # Modified: Add spatial condition mapper to create a spatial condition tensor
+        # Modified: Add spatial condition mapper to create a spatial condition tensor
         self.spatial_mapper = nn.Sequential(
             nn.Linear(self.embedding_dim, 32*32),
             nn.ReLU()
@@ -139,6 +139,7 @@ class PixelCNN(nn.Module):
 
         # Modified: Improved class conditioning with more effective embedding
         batch_size = x.size(0)
+        labels = labels.to(x.device)
         
         # Get class embeddings
         label_embeddings = self.class_embedding(labels)  # [batch_size, embedding_dim]
