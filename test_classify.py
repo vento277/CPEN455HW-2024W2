@@ -42,7 +42,7 @@ def classify(model, model_input, device):
 def get_label(model, model_input, device):
     # changed to predicted
     logits, losses, pred_labels = classify(model, model_input, device)
-    return pred_labels
+    return pred_labels, logits
 # End of your code
 
 def classifier(model, data_loader,dataset,device):
@@ -53,7 +53,7 @@ def classifier(model, data_loader,dataset,device):
         for batch_idx, item in enumerate(tqdm(data_loader)):
             model_input, categories = item
             model_input = model_input.to(device)
-            _, answer, logits = get_label(model, model_input, device)
+            answer, logits = get_label(model, model_input, device)
             logits_all.append(logits.T.cpu())
             answers_all.append(answer.cpu())
 
