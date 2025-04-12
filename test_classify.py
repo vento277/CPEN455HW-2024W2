@@ -77,7 +77,7 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--batch_size', type=int,
                         default=32, help='Batch size for inference')
     parser.add_argument('-m', '--mode', type=str,
-                        default='validation', help='Mode for the dataset')
+                        default='test', help='Mode for the dataset')
     
     args = parser.parse_args()
     pprint(args.__dict__)
@@ -91,7 +91,8 @@ if __name__ == '__main__':
                                              batch_size=args.batch_size, 
                                              shuffle=True, 
                                              **kwargs)
-
+    
+    dataset = CPEN455Dataset(root_dir=args.data_dir, mode=args.mode, transform=ds_transforms)
     #TODO:Begin of your code
     model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=5, num_classes=NUM_CLASSES)
     #End of your code
