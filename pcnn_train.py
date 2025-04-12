@@ -284,8 +284,6 @@ if __name__ == '__main__':
             if args.en_wandb:
                 wandb.log({"samples": sample_result,
                             "FID": fid_score})
-        
-
 
         if (epoch + 1) % args.save_interval == 0: 
             if not os.path.exists("models"):
