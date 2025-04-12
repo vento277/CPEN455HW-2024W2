@@ -59,7 +59,7 @@ def classifier(model, data_loader, device):
     # Save to CSV
     csv_path = os.path.join(os.path.dirname(__file__), 'classifier_results.csv')
     with open(csv_path, 'w', newline='') as csvfile:
-        csv_writer = csv.writer(csvfile, delimiter='|')
+        csv_writer = csv.writer(csvfile)
         # Write relative path and predicted label, no header
         for image_path, pred in zip(data_loader.dataset.samples, all_preds):
             # Get path relative to root_dir (e.g., test/0000021.jpg)
