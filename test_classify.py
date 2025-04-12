@@ -1,19 +1,16 @@
-'''
-Create all the files needed for submission on Hugging Face
-
-'''
+import csv
+import os
 from torchvision import datasets, transforms
 from utils import *
 from model import * 
 from dataset import *
 from tqdm import tqdm
-import csv
 from pprint import pprint
 import argparse
+import torch
+
 NUM_CLASSES = len(my_bidict)
 
-# Write your code here
-# And get the predicted label, which is a tensor of shape (batch_size,)
 #TODO: Begin of your code
 # classification function to convert the output of conditional PixelCNN++ to the prediction labels when given a new image
 def classify(model, model_input, device):
@@ -23,9 +20,6 @@ def classify(model, model_input, device):
     model_input = model_input.repeat(NUM_CLASSES,1,1,1)
 
     # lookup tensor of potential class labels that can be guessed for each image in the batch
-    # class label is repeated to match a batch of data; for parallel processing
-    # eg.) when batch_size=3, num_classes=4
-    # shape: ([0, 0, 0, 1, 1, 1, 2, 2, 2])
     batched_labels = torch.arange(NUM_CLASSES).repeat_interleave(batch_size)
     
     # generate output for each class label
@@ -40,38 +34,48 @@ def classify(model, model_input, device):
     return logits, losses, pred_labels
 
 def get_label(model, model_input, device):
-    # changed to predicted
     logits, losses, pred_labels = classify(model, model_input, device)
-    return pred_labels, logits
+    return pred_labels
 # End of your code
 
-def classifier(model, data_loader,dataset,device):
+def classifier(model, data_loader, device):
     model.eval()
-    logits_all = []
-    answers_all = []
-    with torch.no_grad():
-        for batch_idx, item in enumerate(tqdm(data_loader)):
-            model_input, categories = item
-            model_input = model_input.to(device)
-            answer, logits = get_label(model, model_input, device)
-            logits_all.append(logits.T.cpu())
-            answers_all.append(answer.cpu())
-
-    # ChatGPT prompt: "How to save python list to csv"
-    save_logits = np.concatenate(logits_all, axis=0)
-    save_answers = np.concatenate(answers_all, axis=0)
-    np.save('test_logits.npy', np.concatenate(save_logits, axis=0))
-    print("Shape of saved logits: " + str(save_logits.shape))
-    with open("submission.csv", mode='w', newline='') as file:
-        writer = csv.writer (file)
-        writer.writerow(['id', 'label'])
-        for image_path, answer in zip(dataset.samples, save_answers):
-            img_name = os.path.basename(image_path[0])
-            writer.writerow([img_name, answer])
-        writer.writerow(['fid', 455])
-        print("Done writing submission.csv")
-
-            
+    acc_tracker = ratio_tracker()
+    # Lists to store predictions and original labels for CSV
+    all_preds = []
+    all_originals = []
+    
+    for batch_idx, item in enumerate(tqdm(data_loader)):
+        model_input, categories = item
+        model_input = model_input.to(device)
+        original_label = [my_bidict[item] for item in categories]
+        original_label = torch.tensor(original_label, dtype=torch.int64).to(device)
+        answer = get_label(model, model_input, device)
+        correct_num = torch.sum(answer == original_label)
+        acc_tracker.update(correct_num.item(), model_input.shape[0])
+        
+        # Store predictions and original labels
+        all_preds.extend(answer.cpu().numpy().tolist())
+        all_originals.extend(original_label.cpu().numpy().tolist())
+    
+    # Calculate final accuracy
+    final_acc = acc_tracker.get_ratio()
+    
+    # Save to CSV
+    csv_path = os.path.join(os.path.dirname(__file__), 'classifier_results.csv')
+    with open(csv_path, 'w', newline='') as csvfile:
+        csv_writer = csv.writer(csvfile)
+        # Write header
+        csv_writer.writerow(['Sample_Index', 'Predicted_Label', 'Original_Label'])
+        # Write predictions and original labels
+        for idx, (pred, orig) in enumerate(zip(all_preds, all_originals)):
+            csv_writer.writerow([idx, pred, orig])
+        # Write accuracy at the end
+        csv_writer.writerow([])
+        csv_writer.writerow(['Accuracy', final_acc])
+    
+    print(f"Results saved to {csv_path}")
+    return final_acc
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -81,15 +85,8 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--batch_size', type=int,
                         default=32, help='Batch size for inference')
     parser.add_argument('-m', '--mode', type=str,
-                        default='test', help='Mode for the dataset')
-    parser.add_argument('-q', '--nr_resnet', type=int, default=5,
-                        help='Number of residual blocks per stage of the model')
-    parser.add_argument('-n', '--nr_filters', type=int, default=160,
-                        help='Number of filters to use across the model. Higher = larger model.')
-    parser.add_argument('-o', '--nr_logistic_mix', type=int, default=10,
-                        help='Number of logistic components in the mixture. Higher = more flexible model')
-    parser.add_argument('-u', '--model_name', type=str,
-                        default='conditional_pixelcnn', help='Location for the dataset')
+                        default='validation', help='Mode for the dataset')
+    
     args = parser.parse_args()
     pprint(args.__dict__)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -97,22 +94,17 @@ if __name__ == '__main__':
 
     ds_transforms = transforms.Compose([transforms.Resize((32, 32)), rescaling])
     dataloader = torch.utils.data.DataLoader(CPEN455Dataset(root_dir=args.data_dir, 
-                                                            mode = args.mode, 
+                                                            mode=args.mode, 
                                                             transform=ds_transforms), 
                                              batch_size=args.batch_size, 
-                                             shuffle=False, 
+                                             shuffle=True, 
                                              **kwargs)
-    dataset = CPEN455Dataset(root_dir=args.data_dir, mode=args.mode, transform=ds_transforms)
 
-    #Write your code here
-    #You should replace the random classifier with your trained model
-    #Begin of your code
+    #TODO:Begin of your code
     model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=5, num_classes=NUM_CLASSES)
     #End of your code
-    
+
     model = model.to(device)
-    #Attention: the path of the model is fixed to './models/conditional_pixelcnn.pth'
-    #You should save your model to this path
     model_path = os.path.join(os.path.dirname(__file__), 'models/conditional_pixelcnn.pth')
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path))
@@ -121,8 +113,5 @@ if __name__ == '__main__':
         raise FileNotFoundError(f"Model file not found at {model_path}")
     model.eval()
     
-    acc = classifier(model = model, data_loader = dataloader, dataset = dataset, device = device)
-
-    print('model test set stats saved')
-        
-        
+    acc = classifier(model=model, data_loader=dataloader, device=device)
+    print(f"Accuracy: {acc}")
