@@ -16,7 +16,7 @@ class PixelCNNLayer_up(nn.Module):
                                         resnet_nonlinearity, skip_connection=1)
                                             for _ in range(nr_resnet)])
 
-    def forward(self, u, ul):
+    def forward(self, u, ul):        
         u_list, ul_list = [], []
 
         for i in range(self.nr_resnet):
@@ -42,6 +42,7 @@ class PixelCNNLayer_down(nn.Module):
                                         resnet_nonlinearity, skip_connection=2)
                                             for _ in range(nr_resnet)])
 
+
     def forward(self, u, ul, u_list, ul_list):
         for i in range(self.nr_resnet):
             u  = self.u_stream[i](u, a=u_list.pop())
@@ -52,14 +53,13 @@ class PixelCNNLayer_down(nn.Module):
 
 class PixelCNN(nn.Module):
     def __init__(self, nr_resnet=5, nr_filters=80, nr_logistic_mix=10,
-                    resnet_nonlinearity='concat_elu', input_channels=3, num_classes=4):
+                    resnet_nonlinearity='concat_elu', input_channels=3, num_class=4):
         super(PixelCNN, self).__init__()
         if resnet_nonlinearity == 'concat_elu' :
             self.resnet_nonlinearity = lambda x : concat_elu(x)
         else :
             raise Exception('right now only concat elu is supported as resnet nonlinearity.')
 
-        self.num_classes = num_classes
         self.nr_filters = nr_filters
         self.input_channels = input_channels
         self.nr_logistic_mix = nr_logistic_mix
@@ -97,17 +97,17 @@ class PixelCNN(nn.Module):
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Add the embedding layer
-        self.embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
+        # make class embeddings
+        self.class_embedding = nn.Embedding(num_class, input_channels*32*32)
 
-    # Add the embeddings to the input
-    def addPositionalEmbedding(self, x, labels, img_height, img_width):
-        embs = self.embedding(labels).view(-1, self.input_channels, img_height, img_width)
-        return x + embs
-
+# added labels as a param in forward method
+# label embeddings are created then attached to the input
     def forward(self, x, labels, sample=False):
-        _, _, H, W = x.size()
-        x = self.addPositionalEmbedding(x, labels, H, W)
+        labels = labels.to(x.device)
+        label_embeddings = self.class_embedding(labels)
+        label_embeddings = label_embeddings.view(-1, self.input_channels, 32, 32)
+        # label_embeddings = label_embeddings.expand(-1, -1, x.size(2), x.size(3))
+        x = x + label_embeddings
 
         # similar as done in the tf repo :
         if self.init_padding is not sample:
@@ -154,22 +154,7 @@ class PixelCNN(nn.Module):
         assert len(u_list) == len(ul_list) == 0, pdb.set_trace()
 
         return x_out
-    
-    # Run model inference
-    def infer_img(self, x, device):
-        B, _, _, _ = x.size()
-        inferred_loss = torch.zeros((self.num_classes, B)).to(device)
 
-        # Get the loss for each class
-        for i in range(self.num_classes):
-            # Run the model with each inferred label to get the loss
-            inferred_label = (torch.ones(B, dtype=torch.int64) * i).to(device)
-            model_output = self(x, inferred_label)
-            inferred_loss[i] = discretized_mix_logistic_loss(x, model_output, True)
-
-        # Get the minimum loss and the corresponding label
-        losses, labels = torch.min(inferred_loss, dim=0)
-        return losses, labels, inferred_loss
     
 class random_classifier(nn.Module):
     def __init__(self, NUM_CLASSES):
