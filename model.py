@@ -11,33 +11,55 @@ from layers import gated_resnet, down_shifted_conv2d, down_right_shifted_conv2d,
 class SelfAttention(nn.Module):
     def __init__(self, in_channels):
         super(SelfAttention, self).__init__()
-        self.query = nn.Conv2d(in_channels, in_channels // 8, 1)
-        self.key = nn.Conv2d(in_channels, in_channels // 8, 1)
+        # Increasing the channel dimension for better representation
+        self.query = nn.Conv2d(in_channels, in_channels // 4, 1)  # Increased from // 8
+        self.key = nn.Conv2d(in_channels, in_channels // 4, 1)    # Increased from // 8
         self.value = nn.Conv2d(in_channels, in_channels, 1)
         self.gamma = nn.Parameter(torch.zeros(1))
         self.softmax = nn.Softmax(dim=-1)
-
+        # Add position encoding for better spatial awareness
+        self.position_encoding = nn.Parameter(torch.randn(1, in_channels, 32, 32))  # Assuming max size 32x32
+        
     def forward(self, x):
         batch_size, C, H, W = x.size()
+        # Add position encoding scaled to current feature map size
+        pos_encoding = F.interpolate(self.position_encoding, size=(H, W), mode='bilinear', align_corners=False)
+        x = x + 0.1 * pos_encoding
+        
+        # Multi-head attention mechanism
         query = self.query(x).view(batch_size, -1, H * W).permute(0, 2, 1)
         key = self.key(x).view(batch_size, -1, H * W)
-        attention = self.softmax(torch.bmm(query, key))
+        
+        # Temperature scaling for sharper attention
+        attention = self.softmax(torch.bmm(query, key) / (C ** 0.5))
         value = self.value(x).view(batch_size, -1, H * W)
+        
         out = torch.bmm(value, attention.permute(0, 2, 1)).view(batch_size, C, H, W)
-        return self.gamma * out + x
+        return self.gamma * out + x  # Residual connection
 
 class ConditionalNorm(nn.Module):
     def __init__(self, num_features, embedding_dim):
         super(ConditionalNorm, self).__init__()
-        self.norm = nn.BatchNorm2d(num_features, affine=False)
+        self.instance_norm = nn.InstanceNorm2d(num_features, affine=False)
         self.gamma = nn.Linear(embedding_dim, num_features)
         self.beta = nn.Linear(embedding_dim, num_features)
+        # Don't hardcode layer norm dimensions
+        self.use_layer_norm = nn.Parameter(torch.tensor(0.5))
 
     def forward(self, x, embedding):
-        x = self.norm(x)
+        # Create layer norm on the fly based on current input dimensions
+        if x.size(2) <= 16 and x.size(3) <= 16:
+            # Create layer norm with the exact dimensions of the input
+            layer_norm = nn.LayerNorm([x.size(1), x.size(2), x.size(3)], device=x.device)
+            x_norm = self.instance_norm(x)
+            layer_norm_output = layer_norm(x)
+            x_norm = self.use_layer_norm * layer_norm_output + (1 - self.use_layer_norm) * x_norm
+        else:
+            x_norm = self.instance_norm(x)
+            
         gamma = self.gamma(embedding).view(-1, x.size(1), 1, 1)
         beta = self.beta(embedding).view(-1, x.size(1), 1, 1)
-        return x * (1 + gamma) + beta
+        return x_norm * (1 + gamma) + beta
 
 class PixelCNNLayer_up(nn.Module):
     def __init__(self, nr_resnet, nr_filters, resnet_nonlinearity):
@@ -69,11 +91,20 @@ class PixelCNNLayer_down(nn.Module):
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
                                         resnet_nonlinearity, skip_connection=2)
                                         for _ in range(nr_resnet)])
+        # Add residual scale factors for better gradient flow
+        self.res_scales = nn.ParameterList([nn.Parameter(torch.ones(1) * 0.1) for _ in range(nr_resnet)])
 
     def forward(self, u, ul, u_list, ul_list):
         for i in range(self.nr_resnet):
-            u = self.u_stream[i](u, a=u_list.pop())
-            ul = self.ul_stream[i](ul, a=torch.cat((u, ul_list.pop()), 1))
+            u_skip = u_list.pop()
+            u = self.u_stream[i](u, a=u_skip)
+            # Apply residual scaling for improved stability
+            u = u + self.res_scales[i] * u_skip
+            
+            ul_skip = ul_list.pop()
+            ul = self.ul_stream[i](ul, a=torch.cat((u, ul_skip), 1))
+            # Apply residual scaling
+            ul = ul + self.res_scales[i] * ul_skip
         return u, ul
 
 class PixelCNN(nn.Module):
