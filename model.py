@@ -144,7 +144,7 @@ class PixelCNN(nn.Module):
         self.down_shift_pad = nn.ZeroPad2d((0, 0, 1, 0))
 
         # Increased depth in middle layer for better capacity
-        down_nr_resnet = [nr_resnet] + [nr_resnet + 2, nr_resnet + 1]  # Changed middle layer to +2 instead of +1
+        down_nr_resnet = [nr_resnet] + [nr_resnet + 1] * 2
         self.down_layers = nn.ModuleList([PixelCNNLayer_down(down_nr_resnet[i], nr_filters,
                                             self.resnet_nonlinearity) for i in range(3)])
         self.up_layers = nn.ModuleList([PixelCNNLayer_up(nr_resnet, nr_filters,
