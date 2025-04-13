@@ -39,19 +39,20 @@ class SelfAttention(nn.Module):
 class ConditionalNorm(nn.Module):
     def __init__(self, num_features, embedding_dim):
         super(ConditionalNorm, self).__init__()
-        self.instance_norm = nn.InstanceNorm2d(num_features, affine=False)  # Use instance norm instead of batch norm
+        self.instance_norm = nn.InstanceNorm2d(num_features, affine=False)
         self.gamma = nn.Linear(embedding_dim, num_features)
         self.beta = nn.Linear(embedding_dim, num_features)
-        # Add layer normalization for more stable training
-        self.layer_norm = nn.LayerNorm([num_features, 16, 16])  # Assuming typical size
-        self.use_layer_norm = nn.Parameter(torch.tensor(0.5))  # Learnable parameter
+        # Don't hardcode layer norm dimensions
+        self.use_layer_norm = nn.Parameter(torch.tensor(0.5))
 
     def forward(self, x, embedding):
-        # Adaptive normalization based on feature map size
+        # Create layer norm on the fly based on current input dimensions
         if x.size(2) <= 16 and x.size(3) <= 16:
+            # Create layer norm with the exact dimensions of the input
+            layer_norm = nn.LayerNorm([x.size(1), x.size(2), x.size(3)], device=x.device)
             x_norm = self.instance_norm(x)
-            layer_norm = self.layer_norm(x)
-            x_norm = self.use_layer_norm * layer_norm + (1 - self.use_layer_norm) * x_norm
+            layer_norm_output = layer_norm(x)
+            x_norm = self.use_layer_norm * layer_norm_output + (1 - self.use_layer_norm) * x_norm
         else:
             x_norm = self.instance_norm(x)
             
