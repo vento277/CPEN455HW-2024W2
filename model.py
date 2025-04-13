@@ -153,6 +153,7 @@ class PixelCNN(nn.Module):
         self.attention = SelfAttention(nr_filters)
         
         # Initial convolutions remain the same
+        self.input_norm = nn.LayerNorm([input_channels, 32, 32])
         self.u_init = down_shifted_conv2d(input_channels, nr_filters, filter_size=(2,3),
                                          shift_output_down=True)
         self.ul_init = nn.ModuleList([
@@ -185,6 +186,7 @@ class PixelCNN(nn.Module):
             xs = [int(y) for y in x.size()]
             self.init_padding = None  # No padding added
 
+        x = self.input_norm(x)
         u_list = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
         for i in range(3):
