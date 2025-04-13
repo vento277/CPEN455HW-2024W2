@@ -82,6 +82,7 @@ class PixelCNNLayer_up(nn.Module):
 
 class PixelCNNLayer_down(nn.Module):
     def __init__(self, nr_resnet, nr_filters, resnet_nonlinearity):
+        # Keep existing initialization code
         super(PixelCNNLayer_down, self).__init__()
         self.nr_resnet = nr_resnet
         self.u_stream = nn.ModuleList([gated_resnet(nr_filters, down_shifted_conv2d,
@@ -90,20 +91,26 @@ class PixelCNNLayer_down(nn.Module):
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
                                         resnet_nonlinearity, skip_connection=2)
                                         for _ in range(nr_resnet)])
-        # Add residual scale factors for better gradient flow
         self.res_scales = nn.ParameterList([nn.Parameter(torch.ones(1) * 0.1) for _ in range(nr_resnet)])
 
     def forward(self, u, ul, u_list, ul_list):
         for i in range(self.nr_resnet):
             u_skip = u_list.pop()
             u = self.u_stream[i](u, a=u_skip)
-            # Apply residual scaling for improved stability
             u = u + self.res_scales[i] * u_skip
             
             ul_skip = ul_list.pop()
-            ul = self.ul_stream[i](ul, a=torch.cat((u, ul_skip), 1))
-            # Apply residual scaling
+            
+            # Check and resize u to match ul_skip's spatial dimensions if needed
+            if u.size(2) != ul_skip.size(2) or u.size(3) != ul_skip.size(3):
+                u_resized = F.interpolate(u, size=(ul_skip.size(2), ul_skip.size(3)), 
+                                          mode='bilinear', align_corners=False)
+            else:
+                u_resized = u
+                
+            ul = self.ul_stream[i](ul, a=torch.cat((u_resized, ul_skip), 1))
             ul = ul + self.res_scales[i] * ul_skip
+            
         return u, ul
 
 class PixelCNN(nn.Module):
