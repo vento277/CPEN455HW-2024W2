@@ -142,6 +142,7 @@ class PixelCNN(nn.Module):
 
     def forward(self, x, label, sample=False):
         # Process conditioning information
+        label = label.to(x.device)
         label_embedding = self.conditional_embedding(label)
         h_condition = self.cond_to_spatial(label_embedding).unsqueeze(2).unsqueeze(3)  # Convert to spatial dimension [B, C, 1, 1]
         
