@@ -11,8 +11,8 @@ from layers import gated_resnet, down_shifted_conv2d, down_right_shifted_conv2d,
 class SelfAttention(nn.Module):
     def __init__(self, in_channels):
         super(SelfAttention, self).__init__()
-        self.query = nn.Conv2d(in_channels, in_channels // 4, 1)
-        self.key = nn.Conv2d(in_channels, in_channels // 4, 1)
+        self.query = nn.Conv2d(in_channels, in_channels // 8, 1)
+        self.key = nn.Conv2d(in_channels, in_channels // 8, 1)
         self.value = nn.Conv2d(in_channels, in_channels, 1)
         self.gamma = nn.Parameter(torch.zeros(1))
         self.softmax = nn.Softmax(dim=-1)
