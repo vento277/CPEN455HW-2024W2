@@ -36,7 +36,7 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
 
         # Check if the model is in training mode or test mode
         if mode == 'test':
-            losses, label_preds = model.infer_img(model_input, device)
+            losses, label_preds, _ = model.infer_img(model_input, device)
             loss_tracker.update(torch.sum(losses).item()/deno)
         else:
             labels = torch.tensor([my_bidict[item] for item in labels])
