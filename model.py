@@ -7,12 +7,12 @@ class PixelCNNLayer_up(nn.Module):
         self.nr_resnet = nr_resnet
         # stream from pixels above
         self.u_stream = nn.ModuleList([gated_resnet(nr_filters, down_shifted_conv2d,
-                                        resnet_nonlinearity, skip_connection=0, use_batch_norm=True)  # Change 1: Enable batch norm
+                                        resnet_nonlinearity, skip_connection=0)  
                                             for _ in range(nr_resnet)])
 
         # stream from pixels above and to the left
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
-                                        resnet_nonlinearity, skip_connection=1, use_batch_norm=True)  # Change 1: Enable batch norm
+                                        resnet_nonlinearity, skip_connection=1)  
                                             for _ in range(nr_resnet)])
 
     def forward(self, u, ul):
@@ -32,12 +32,12 @@ class PixelCNNLayer_down(nn.Module):
         self.nr_resnet = nr_resnet
         # stream from pixels above
         self.u_stream  = nn.ModuleList([gated_resnet(nr_filters, down_shifted_conv2d,
-                                        resnet_nonlinearity, skip_connection=1, use_batch_norm=True)  # Change 1: Enable batch norm
+                                        resnet_nonlinearity, skip_connection=1) 
                                             for _ in range(nr_resnet)])
 
         # stream from pixels above and to the left
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
-                                        resnet_nonlinearity, skip_connection=2, use_batch_norm=True)  # Change 1: Enable batch norm
+                                        resnet_nonlinearity, skip_connection=2) 
                                             for _ in range(nr_resnet)])
 
     def forward(self, u, ul, u_list, ul_list):
@@ -63,7 +63,7 @@ class PixelCNN(nn.Module):
         self.down_shift_pad  = nn.ZeroPad2d((0, 0, 1, 0))
 
         down_nr_resnet = [nr_resnet] + [nr_resnet + 1] * 2
-        # Change 2: Gradually increase filters across layers for better feature extraction
+        # Gradually increase filters across layers for better feature extraction
         filter_sizes = [nr_filters, int(nr_filters * 1.5), int(nr_filters * 2)]  # e.g., [80, 120, 160]
         self.down_layers = nn.ModuleList([PixelCNNLayer_down(down_nr_resnet[i], filter_sizes[i],
                                                 self.resnet_nonlinearity) for i in range(3)])
