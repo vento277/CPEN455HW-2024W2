@@ -97,31 +97,13 @@ class PixelCNN(nn.Module):
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Add the embedding layer with proper initialization
+        # Add the embedding layer
         self.embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
-        # Initialize embedding weights with small values for better convergence
-        nn.init.normal_(self.embedding.weight, mean=0.0, std=0.02)
-        
-        # Add a simple conditioning network for better class representations
-        self.condition_net = nn.Sequential(
-            nn.Linear(input_channels * 32 * 32, input_channels * 32 * 32),
-            nn.ReLU()
-        )
 
-    # Add the embeddings to the input with improved conditioning
+    # Add the embeddings to the input
     def addPositionalEmbedding(self, x, labels, img_height, img_width):
-        # Get raw embeddings
-        raw_embs = self.embedding(labels)
-        
-        # Process embeddings through conditioning network
-        processed_embs = self.condition_net(raw_embs)
-        
-        # Reshape to match input dimensions
-        embs = processed_embs.view(-1, self.input_channels, img_height, img_width)
-        
-        # Apply adaptive scaling factor to control embedding influence
-        alpha = 0.8  # Scaling factor between 0-1
-        return x + alpha * embs
+        embs = self.embedding(labels).view(-1, self.input_channels, img_height, img_width)
+        return x + embs
 
     def forward(self, x, labels, sample=False):
         _, _, H, W = x.size()
@@ -174,7 +156,7 @@ class PixelCNN(nn.Module):
 
         return x_out
     
-    # Run model inference with improved decision confidence
+    # Run model inference
     def infer_img(self, x, device):
         B, _, _, _ = x.size()
         inferred_loss = torch.zeros((self.num_classes, B)).to(device)
@@ -185,22 +167,9 @@ class PixelCNN(nn.Module):
             inferred_label = (torch.ones(B, dtype=torch.int64) * i).to(device)
             model_output = self(x, inferred_label)
             inferred_loss[i] = discretized_mix_logistic_loss(x, model_output, True)
-            
-        # Apply softmax-based confidence weighting to make more confident predictions
-        # This helps with ambiguous cases by increasing decision margins
-        softmax_weights = F.softmax(-inferred_loss, dim=0)  # Convert losses to weights
-        confidence_threshold = 0.4  # Confidence threshold for decision
-        
+
         # Get the minimum loss and the corresponding label
         losses, labels = torch.min(inferred_loss, dim=0)
-        
-        # Check confidence for each prediction
-        for b in range(B):
-            if softmax_weights[labels[b], b] < confidence_threshold:
-                # For low-confidence predictions, perform additional inference
-                # Take multiple samples and use the one with lowest loss
-                losses[b], labels[b] = torch.min(inferred_loss[:, b], dim=0)
-                
         return losses, labels, inferred_loss
     
 class random_classifier(nn.Module):
@@ -215,3 +184,5 @@ class random_classifier(nn.Module):
         torch.save(self.state_dict(), 'models/conditional_pixelcnn.pth')
     def forward(self, x, device):
         return torch.randint(0, self.NUM_CLASSES, (x.shape[0],)).to(device)
+    
+    
