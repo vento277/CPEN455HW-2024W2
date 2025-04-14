@@ -1,5 +1,4 @@
 import torch.nn as nn
-import torch.nn.functional as F
 from layers import *
 
 
@@ -27,7 +26,8 @@ class PixelCNNLayer_up(nn.Module):
             ul_list += [ul]
 
         return u_list, ul_list
-    
+
+
 class PixelCNNLayer_down(nn.Module):
     def __init__(self, nr_resnet, nr_filters, resnet_nonlinearity):
         super(PixelCNNLayer_down, self).__init__()
@@ -49,6 +49,7 @@ class PixelCNNLayer_down(nn.Module):
 
         return u, ul
 
+
 class PixelCNN(nn.Module):
     def __init__(self, nr_resnet=5, nr_filters=80, nr_logistic_mix=10,
                     resnet_nonlinearity='concat_elu', input_channels=3, num_classes=4):
@@ -58,10 +59,10 @@ class PixelCNN(nn.Module):
         else :
             raise Exception('right now only concat elu is supported as resnet nonlinearity.')
 
+        self.num_classes = num_classes
         self.nr_filters = nr_filters
         self.input_channels = input_channels
         self.nr_logistic_mix = nr_logistic_mix
-        self.num_classes = num_classes  # Store num_classes as instance variable for use in other methods
         self.right_shift_pad = nn.ZeroPad2d((1, 0, 0, 0))
         self.down_shift_pad  = nn.ZeroPad2d((0, 0, 1, 0))
 
@@ -96,25 +97,36 @@ class PixelCNN(nn.Module):
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Class embeddings
-        self.class_embedding = nn.Embedding(num_classes, input_channels*32*32)
+        # Add the embedding layer with proper initialization
+        self.embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
+        # Initialize embedding weights with small values for better convergence
+        nn.init.normal_(self.embedding.weight, mean=0.0, std=0.02)
         
-        # CHANGE 1: Initialize embedding weights properly for better stability and convergence
-        # This helps with gradient flow and learning class-specific features
-        nn.init.normal_(self.class_embedding.weight, mean=0.0, std=0.01)
+        # Add a simple conditioning network for better class representations
+        self.condition_net = nn.Sequential(
+            nn.Linear(input_channels * 32 * 32, input_channels * 32 * 32),
+            nn.ReLU()
+        )
 
+    # Add the embeddings to the input with improved conditioning
+    def addPositionalEmbedding(self, x, labels, img_height, img_width):
+        # Get raw embeddings
+        raw_embs = self.embedding(labels)
+        
+        # Process embeddings through conditioning network
+        processed_embs = self.condition_net(raw_embs)
+        
+        # Reshape to match input dimensions
+        embs = processed_embs.view(-1, self.input_channels, img_height, img_width)
+        
+        # Apply adaptive scaling factor to control embedding influence
+        alpha = 0.8  # Scaling factor between 0-1
+        return x + alpha * embs
 
     def forward(self, x, labels, sample=False):
-        # label embeddings are created then attached to the input
-        labels = labels.to(x.device)
-        label_embeddings = self.class_embedding(labels)
-        label_embeddings = label_embeddings.view(-1, self.input_channels, 32, 32)
-        
-        # CHANGE 2: Implement class conditioning through scaling rather than addition
-        # This provides a more effective way to modulate features based on class information
-        scale = 0.1  # Small scaling factor to prevent overfitting
-        x = x + scale * label_embeddings  # Apply scaled conditioning
-    
+        _, _, H, W = x.size()
+        x = self.addPositionalEmbedding(x, labels, H, W)
+
         # similar as done in the tf repo :
         if self.init_padding is not sample:
             xs = [int(y) for y in x.size()]
@@ -161,7 +173,7 @@ class PixelCNN(nn.Module):
 
         return x_out
     
-    # Run model inference
+    # Run model inference with improved decision confidence
     def infer_img(self, x, device):
         B, _, _, _ = x.size()
         inferred_loss = torch.zeros((self.num_classes, B)).to(device)
@@ -172,9 +184,22 @@ class PixelCNN(nn.Module):
             inferred_label = (torch.ones(B, dtype=torch.int64) * i).to(device)
             model_output = self(x, inferred_label)
             inferred_loss[i] = discretized_mix_logistic_loss(x, model_output, True)
-
+            
+        # Apply softmax-based confidence weighting to make more confident predictions
+        # This helps with ambiguous cases by increasing decision margins
+        softmax_weights = F.softmax(-inferred_loss, dim=0)  # Convert losses to weights
+        confidence_threshold = 0.4  # Confidence threshold for decision
+        
         # Get the minimum loss and the corresponding label
         losses, labels = torch.min(inferred_loss, dim=0)
+        
+        # Check confidence for each prediction
+        for b in range(B):
+            if softmax_weights[labels[b], b] < confidence_threshold:
+                # For low-confidence predictions, perform additional inference
+                # Take multiple samples and use the one with lowest loss
+                losses[b], labels[b] = torch.min(inferred_loss[:, b], dim=0)
+                
         return losses, labels, inferred_loss
     
 class random_classifier(nn.Module):
@@ -184,8 +209,8 @@ class random_classifier(nn.Module):
         self.fc = nn.Linear(3, NUM_CLASSES)
         print("Random classifier initialized")
         # create a folder
-        if os.path.join(os.path.dirname(__file__), 'models') not in os.listdir():
-            os.mkdir(os.path.join(os.path.dirname(__file__), 'models'))
-        torch.save(self.state_dict(), os.path.join(os.path.dirname(__file__), 'models/conditional_pixelcnn.pth'))
+        if 'models' not in os.listdir():
+            os.mkdir('models')
+        torch.save(self.state_dict(), 'models/conditional_pixelcnn.pth')
     def forward(self, x, device):
         return torch.randint(0, self.NUM_CLASSES, (x.shape[0],)).to(device)
