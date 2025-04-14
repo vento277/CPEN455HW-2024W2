@@ -15,7 +15,6 @@ class PixelCNNLayer_up(nn.Module):
                                             for _ in range(nr_resnet)])
 
         # stream from pixels above and to the left
-        # Fixed typo in comment: "thes" -> "the"
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
                                         resnet_nonlinearity, skip_connection=1)
                                             for _ in range(nr_resnet)])
@@ -42,7 +41,6 @@ class PixelCNNLayer_down(nn.Module):
                                             for _ in range(nr_resnet)])
 
         # stream from pixels above and to the left
-        # Fixed typo in comment: "thes" -> "the"
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
                                         resnet_nonlinearity, skip_connection=2)
                                             for _ in range(nr_resnet)])
@@ -138,15 +136,26 @@ class PixelCNN(nn.Module):
         # Apply embedding
         x = self.addPositionalEmbedding(x, labels, H, W)
 
-        # Cache the padding if not already created
-        if self.init_padding is None or sample:
-            # Create padding tensor with proper dimensions
-            padding = torch.ones(B, 1, H, W, device=x.device, requires_grad=False)
+        # similar as done in the tf repo :
+        # FIXED: Corrected the padding initialization to avoid dimension mismatch
+        if self.init_padding is None or self.init_padding.size(0) != B:
+            # Create padding with correct batch size
+            padding = Variable(torch.ones(B, 1, H, W), requires_grad=False)
+            padding = padding.cuda() if x.is_cuda else padding
             if not sample:
                 self.init_padding = padding
 
         ###      UP PASS    ###
-        x = torch.cat((x, padding if sample else self.init_padding), 1)
+        # FIXED: Use proper padding tensor with correct dimensions
+        if sample:
+            # Create new padding for each sampling step
+            padding = Variable(torch.ones(B, 1, H, W), requires_grad=False)
+            padding = padding.cuda() if x.is_cuda else padding
+            x = torch.cat((x, padding), 1)
+        else:
+            # Use cached padding
+            x = torch.cat((x, self.init_padding), 1)
+            
         u_list  = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
         
