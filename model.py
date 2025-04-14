@@ -1,4 +1,7 @@
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.autograd import Variable
+import os
 from layers import *
 
 
@@ -11,7 +14,8 @@ class PixelCNNLayer_up(nn.Module):
                                         resnet_nonlinearity, skip_connection=0)
                                             for _ in range(nr_resnet)])
 
-        # stream from pixels above and to thes left
+        # stream from pixels above and to the left
+        # Fixed typo in comment: "thes" -> "the"
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
                                         resnet_nonlinearity, skip_connection=1)
                                             for _ in range(nr_resnet)])
@@ -37,7 +41,8 @@ class PixelCNNLayer_down(nn.Module):
                                         resnet_nonlinearity, skip_connection=1)
                                             for _ in range(nr_resnet)])
 
-        # stream from pixels above and to thes left
+        # stream from pixels above and to the left
+        # Fixed typo in comment: "thes" -> "the"
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
                                         resnet_nonlinearity, skip_connection=2)
                                             for _ in range(nr_resnet)])
@@ -54,10 +59,14 @@ class PixelCNN(nn.Module):
     def __init__(self, nr_resnet=5, nr_filters=80, nr_logistic_mix=10,
                     resnet_nonlinearity='concat_elu', input_channels=3, num_classes=4):
         super(PixelCNN, self).__init__()
-        if resnet_nonlinearity == 'concat_elu' :
+        if resnet_nonlinearity == 'concat_elu':
             self.resnet_nonlinearity = lambda x : concat_elu(x)
-        else :
-            raise Exception('right now only concat elu is supported as resnet nonlinearity.')
+        elif resnet_nonlinearity == 'elu':  # Added support for ELU nonlinearity
+            self.resnet_nonlinearity = lambda x : F.elu(x)
+        elif resnet_nonlinearity == 'relu':  # Added support for ReLU nonlinearity
+            self.resnet_nonlinearity = lambda x : F.relu(x)
+        else:
+            raise Exception('Currently supported nonlinearities: concat_elu, elu, relu')
 
         self.num_classes = num_classes
         self.nr_filters = nr_filters
@@ -93,39 +102,54 @@ class PixelCNN(nn.Module):
                                        down_right_shifted_conv2d(input_channels + 1, nr_filters,
                                             filter_size=(2,1), shift_output_right=True)])
 
-        num_mix = 3 if self.input_channels == 1 else 10
-        self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
+        # Added condition to properly handle grayscale vs RGB images
+        self.num_mix = 3 if self.input_channels == 1 else 10
+        self.nin_out = nin(nr_filters, self.num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Add the embedding layer
-        self.embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
+        # Add the embedding layer with a more descriptive name
+        self.class_embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
+        
+        # Added dropout for regularization
+        self.dropout = nn.Dropout(0.1)
 
     # Add the embeddings to the input
     def addPositionalEmbedding(self, x, labels, img_height, img_width):
-        embs = self.embedding(labels).view(-1, self.input_channels, img_height, img_width)
+        """
+        Adds class embedding to the input tensor.
+        
+        Args:
+            x: Input image tensor
+            labels: Class labels
+            img_height: Height of input image
+            img_width: Width of input image
+            
+        Returns:
+            Image tensor with added embeddings
+        """
+        embs = self.class_embedding(labels).view(-1, self.input_channels, img_height, img_width)
         return x + embs
 
     def forward(self, x, labels, sample=False):
-        _, _, H, W = x.size()
+        # Get dimensions from input tensor
+        B, C, H, W = x.size()
         labels = labels.to(x.device)
+        
+        # Apply embedding
         x = self.addPositionalEmbedding(x, labels, H, W)
 
-        # similar as done in the tf repo :
-        if self.init_padding is not sample:
-            xs = [int(y) for y in x.size()]
-            padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
-            self.init_padding = padding.cuda() if x.is_cuda else padding
-
-        if sample :
-            xs = [int(y) for y in x.size()]
-            padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
-            padding = padding.cuda() if x.is_cuda else padding
-            x = torch.cat((x, padding), 1)
+        # Cache the padding if not already created
+        if self.init_padding is None or sample:
+            # Create padding tensor with proper dimensions
+            padding = torch.ones(B, 1, H, W, device=x.device, requires_grad=False)
+            if not sample:
+                self.init_padding = padding
 
         ###      UP PASS    ###
-        x = x if sample else torch.cat((x, self.init_padding), 1)
+        x = torch.cat((x, padding if sample else self.init_padding), 1)
         u_list  = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
+        
         for i in range(3):
             # resnet block
             u_out, ul_out = self.up_layers[i](u_list[-1], ul_list[-1])
@@ -146,40 +170,85 @@ class PixelCNN(nn.Module):
             u, ul = self.down_layers[i](u, ul, u_list, ul_list)
 
             # upscale (only twice)
-            if i != 2 :
+            if i != 2:
                 u  = self.upsize_u_stream[i](u)
                 ul = self.upsize_ul_stream[i](ul)
 
+        # Added dropout before final layer for regularization
+        ul = self.dropout(ul)
         x_out = self.nin_out(F.elu(ul))
 
-        assert len(u_list) == len(ul_list) == 0, pdb.set_trace()
+        # Added assertion to catch errors during development
+        assert len(u_list) == len(ul_list) == 0, "Unmatched elements in u_list or ul_list"
 
         return x_out
     
-    # Run model inference
+    # Run model inference with improved documentation and error handling
     def infer_img(self, x, device):
+        """
+        Perform inference to determine the most likely class for each input image.
+        
+        Args:
+            x: Input image tensor of shape [B, C, H, W]
+            device: Device to perform computation on
+            
+        Returns:
+            tuple: (losses, predicted_labels, all_class_losses)
+        """
         B, _, H, W = x.size()
         
-        # Run the model once for all classes in parallel (this is the key optimization)
-        # Create a batch with B*num_classes samples
-        x_expanded = x.repeat(self.num_classes, 1, 1, 1)
+        # Validate input
+        if B <= 0:
+            raise ValueError("Batch size must be positive")
         
-        # Create labels for all classes for each sample in the batch
-        all_labels = torch.arange(self.num_classes, device=device).repeat_interleave(B)
-        
-        # Run the model once with the expanded batch
-        model_output = self(x_expanded, all_labels)
-        
-        # Calculate losses for all classes in one forward pass
-        all_losses = discretized_mix_logistic_loss(x.repeat(self.num_classes, 1, 1, 1), 
-                                                model_output, True)
-        
-        # Reshape losses to [num_classes, B]
-        inferred_loss = all_losses.view(self.num_classes, B)
-        
-        # Get the minimum loss and the corresponding label
-        losses, labels = torch.min(inferred_loss, dim=0)
-        return losses, labels, inferred_loss
+        try:
+            # Run the model once for all classes in parallel (this is the key optimization)
+            # Create a batch with B*num_classes samples
+            x_expanded = x.repeat(self.num_classes, 1, 1, 1)
+            
+            # Create labels for all classes for each sample in the batch
+            all_labels = torch.arange(self.num_classes, device=device).repeat_interleave(B)
+            
+            # Run the model once with the expanded batch
+            model_output = self(x_expanded, all_labels)
+            
+            # Calculate losses for all classes in one forward pass
+            all_losses = discretized_mix_logistic_loss(x.repeat(self.num_classes, 1, 1, 1), 
+                                                    model_output, True)
+            
+            # Reshape losses to [num_classes, B]
+            inferred_loss = all_losses.view(self.num_classes, B)
+            
+            # Get the minimum loss and the corresponding label
+            losses, labels = torch.min(inferred_loss, dim=0)
+            return losses, labels, inferred_loss
+            
+        except RuntimeError as e:
+            if 'out of memory' in str(e):
+                # Fallback to per-class sequential processing when OOM occurs
+                print("Warning: Out of memory. Falling back to sequential processing.")
+                losses = torch.zeros(B, device=device)
+                labels = torch.zeros(B, dtype=torch.long, device=device)
+                all_losses = torch.zeros(self.num_classes, B, device=device)
+                
+                # Process each class sequentially
+                for c in range(self.num_classes):
+                    class_labels = torch.full((B,), c, dtype=torch.long, device=device)
+                    output = self(x, class_labels)
+                    class_loss = discretized_mix_logistic_loss(x, output, True)
+                    all_losses[c] = class_loss
+                
+                # Get minimum loss and corresponding label
+                for i in range(B):
+                    class_losses = all_losses[:, i]
+                    min_loss, min_idx = torch.min(class_losses, dim=0)
+                    losses[i] = min_loss
+                    labels[i] = min_idx
+                
+                return losses, labels, all_losses
+            else:
+                # Re-raise other errors
+                raise
     
 class random_classifier(nn.Module):
     def __init__(self, NUM_CLASSES):
@@ -187,11 +256,14 @@ class random_classifier(nn.Module):
         self.NUM_CLASSES = NUM_CLASSES
         self.fc = nn.Linear(3, NUM_CLASSES)
         print("Random classifier initialized")
-        # create a folder
-        if 'models' not in os.listdir():
-            os.mkdir('models')
+        
+        # Create models directory if it doesn't exist
+        if not os.path.exists('models'):
+            os.makedirs('models')
+            
         torch.save(self.state_dict(), 'models/conditional_pixelcnn.pth')
+        
     def forward(self, x, device):
-        return torch.randint(0, self.NUM_CLASSES, (x.shape[0],)).to(device)
-    
-    
+        # Added batch handling to ensure consistent behavior
+        batch_size = x.shape[0]
+        return torch.randint(0, self.NUM_CLASSES, (batch_size,), device=device)

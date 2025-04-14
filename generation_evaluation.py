@@ -32,7 +32,7 @@ def my_sample(model, gen_data_dir, device, sample_batch_size=25, obs=(3,32,32)):
 if __name__ == "__main__":
     ref_data_dir = "data/test"
     gen_data_dir = "samples"
-    BATCH_SIZE=128
+    BATCH_SIZE=16
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     if not os.path.exists(gen_data_dir):
