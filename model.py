@@ -63,8 +63,6 @@ class PixelCNN(nn.Module):
         self.down_shift_pad  = nn.ZeroPad2d((0, 0, 1, 0))
 
         down_nr_resnet = [nr_resnet] + [nr_resnet + 1] * 2
-        # Gradually increase filters across layers for better feature extraction
-        filter_sizes = [nr_filters, int(nr_filters * 1.5), int(nr_filters * 2)]  # e.g., [80, 120, 160]
         self.down_layers = nn.ModuleList([PixelCNNLayer_down(down_nr_resnet[i], filter_sizes[i],
                                                 self.resnet_nonlinearity) for i in range(3)])
 
@@ -156,16 +154,25 @@ class PixelCNN(nn.Module):
     
     # Run model inference
     def infer_img(self, x, device):
-        B, _, _, _ = x.size()
-        inferred_loss = torch.zeros((self.num_classes, B)).to(device)
-
-        # Get the loss for each class
-        for i in range(self.num_classes):
-            # Run the model with each inferred label to get the loss
-            inferred_label = (torch.ones(B, dtype=torch.int64) * i).to(device)
-            model_output = self(x, inferred_label)
-            inferred_loss[i] = discretized_mix_logistic_loss(x, model_output, True)
-
+        B, _, H, W = x.size()
+        
+        # Run the model once for all classes in parallel (this is the key optimization)
+        # Create a batch with B*num_classes samples
+        x_expanded = x.repeat(self.num_classes, 1, 1, 1)
+        
+        # Create labels for all classes for each sample in the batch
+        all_labels = torch.arange(self.num_classes, device=device).repeat_interleave(B)
+        
+        # Run the model once with the expanded batch
+        model_output = self(x_expanded, all_labels)
+        
+        # Calculate losses for all classes in one forward pass
+        all_losses = discretized_mix_logistic_loss(x.repeat(self.num_classes, 1, 1, 1), 
+                                                model_output, True)
+        
+        # Reshape losses to [num_classes, B]
+        inferred_loss = all_losses.view(self.num_classes, B)
+        
         # Get the minimum loss and the corresponding label
         losses, labels = torch.min(inferred_loss, dim=0)
         return losses, labels, inferred_loss
