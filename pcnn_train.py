@@ -45,7 +45,7 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
                 loss.backward()
                 optimizer.step()
             else:
-                _, label_preds = model.infer_img(model_input, device)
+                _, label_preds, _ = model.infer_img(model_input, device)
                 val_acc_tracker.update(torch.sum(label_preds == labels).item()/args.batch_size)
         
     if args.en_wandb:
