@@ -105,7 +105,6 @@ class PixelCNN(nn.Module):
     def forward(self, x, class_label = None, sample=False):
 
         B, C, H, W = x.shape 
-        class_labels = class_labels.to(x.device)
 
             #class_embedding = self.embedding(class_label)
             #Reshape embedding for broadcasting
@@ -113,6 +112,7 @@ class PixelCNN(nn.Module):
             # Add to feature maps
             #x = x + embed_proj
         if class_label is not None:
+            class_label = class_label.to(x.device)
             cond_vec = self.class_embedding(class_label)
             #print("conditioning on class:", class_label)
         else:
