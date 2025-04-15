@@ -1,6 +1,10 @@
 import torch.nn as nn
 from layers import *
-
+import torch
+import torch.nn.functional as F
+from torch.nn.parameter import Parameter
+import os
+from torch.autograd import Variable
 
 class PixelCNNLayer_up(nn.Module):
     def __init__(self, nr_resnet, nr_filters, resnet_nonlinearity):
@@ -8,13 +12,13 @@ class PixelCNNLayer_up(nn.Module):
         self.nr_resnet = nr_resnet
         # stream from pixels above
         self.u_stream = nn.ModuleList([gated_resnet(nr_filters, down_shifted_conv2d,
-                                                    resnet_nonlinearity, skip_connection=0)
-                                        for _ in range(nr_resnet)])
+                                                        resnet_nonlinearity, skip_connection=0)
+                                                for _ in range(nr_resnet)])
 
         # stream from pixels above and to thes left
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
-                                                     resnet_nonlinearity, skip_connection=1)
-                                         for _ in range(nr_resnet)])
+                                                        resnet_nonlinearity, skip_connection=1)
+                                                for _ in range(nr_resnet)])
 
     def forward(self, u, ul):
         u_list, ul_list = [], []
@@ -34,13 +38,13 @@ class PixelCNNLayer_down(nn.Module):
         self.nr_resnet = nr_resnet
         # stream from pixels above
         self.u_stream = nn.ModuleList([gated_resnet(nr_filters, down_shifted_conv2d,
-                                                     resnet_nonlinearity, skip_connection=1)
-                                         for _ in range(nr_resnet)])
+                                                        resnet_nonlinearity, skip_connection=1)
+                                                for _ in range(nr_resnet)])
 
         # stream from pixels above and to thes left
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
-                                                     resnet_nonlinearity, skip_connection=2)
-                                         for _ in range(nr_resnet)])
+                                                        resnet_nonlinearity, skip_connection=2)
+                                                for _ in range(nr_resnet)])
 
     def forward(self, u, ul, u_list, ul_list):
         for i in range(self.nr_resnet):
@@ -51,12 +55,12 @@ class PixelCNNLayer_down(nn.Module):
 
 
 class PixelCNN(nn.Module):
-    def __init__(self, nr_resnet=5, nr_filters=80, nr_logistic_mix=10,
-                 resnet_nonlinearity='concat_elu', input_channels=3, num_classes=4):
+    def __init__(self, nr_resnet=7, nr_filters=128, nr_logistic_mix=10,
+                         resnet_nonlinearity='concat_elu', input_channels=3, num_classes=4, dropout_p=0.3): # Increased nr_resnet and nr_filters, added dropout_p
         super(PixelCNN, self).__init__()
-        if resnet_nonlinearity == 'concat_elu':
-            self.resnet_nonlinearity = lambda x: concat_elu(x)
-        else:
+        if resnet_nonlinearity == 'concat_elu' :
+            self.resnet_nonlinearity = lambda x : concat_elu(x)
+        else :
             raise Exception('right now only concat elu is supported as resnet nonlinearity.')
 
         self.num_classes = num_classes
@@ -65,44 +69,40 @@ class PixelCNN(nn.Module):
         self.nr_logistic_mix = nr_logistic_mix
         self.right_shift_pad = nn.ZeroPad2d((1, 0, 0, 0))
         self.down_shift_pad = nn.ZeroPad2d((0, 0, 1, 0))
+        self.dropout_p = dropout_p # Store dropout probability
 
         down_nr_resnet = [nr_resnet] + [nr_resnet + 1] * 2
         self.down_layers = nn.ModuleList([PixelCNNLayer_down(down_nr_resnet[i], nr_filters,
-                                                             self.resnet_nonlinearity) for i in range(3)])
+                                                                    self.resnet_nonlinearity) for i in range(3)])
 
-        self.up_layers = nn.ModuleList([PixelCNNLayer_up(nr_resnet, nr_filters,
-                                                           self.resnet_nonlinearity) for _ in range(3)])
+        self.up_layers  = nn.ModuleList([PixelCNNLayer_up(nr_resnet, nr_filters,
+                                                                    self.resnet_nonlinearity) for _ in range(3)])
 
         self.downsize_u_stream = nn.ModuleList([down_shifted_conv2d(nr_filters, nr_filters,
-                                                                     stride=(2, 2)) for _ in range(2)])
+                                                                            stride=(2,2), norm='batch_norm') for _ in range(2)]) # Added batch norm
 
         self.downsize_ul_stream = nn.ModuleList([down_right_shifted_conv2d(nr_filters,
-                                                                          nr_filters, stride=(2, 2)) for _ in range(2)])
+                                                                                    nr_filters, stride=(2,2), norm='batch_norm') for _ in range(2)]) # Added batch norm
 
         self.upsize_u_stream = nn.ModuleList([down_shifted_deconv2d(nr_filters, nr_filters,
-                                                                      stride=(2, 2)) for _ in range(2)])
+                                                                            stride=(2,2)) for _ in range(2)])
 
         self.upsize_ul_stream = nn.ModuleList([down_right_shifted_deconv2d(nr_filters,
-                                                                           nr_filters, stride=(2, 2)) for _ in range(2)])
+                                                                                    nr_filters, stride=(2,2)) for _ in range(2)])
 
-        self.u_init = down_shifted_conv2d(input_channels + 1, nr_filters, filter_size=(2, 3),
-                                          shift_output_down=True)
+        self.u_init = down_shifted_conv2d(input_channels + 1, nr_filters, filter_size=(2,3),
+                                            shift_output_down=True, norm='batch_norm') # Added batch norm
 
         self.ul_init = nn.ModuleList([down_shifted_conv2d(input_channels + 1, nr_filters,
-                                                           filter_size=(1, 3), shift_output_down=True),
-                                      down_right_shifted_conv2d(input_channels + 1, nr_filters,
-                                                                filter_size=(2, 1), shift_output_right=True)])
+                                                                    filter_size=(1,3), shift_output_down=True, norm='batch_norm'), # Added batch norm
+                                        down_right_shifted_conv2d(input_channels + 1, nr_filters,
+                                                                    filter_size=(2,1), shift_output_right=True, norm='batch_norm')]) # Added batch norm
 
         num_mix = 3 if self.input_channels == 1 else 10
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Add a global average pooling layer to get a fixed-size feature vector
-        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        # Add a fully connected layer for classification
-        self.fc = nn.Linear(nr_filters, num_classes)
-
-        # Add the embedding layer for conditional generation
+        # Add the embedding layer
         self.embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
 
     # Add the embeddings to the input
@@ -121,13 +121,13 @@ class PixelCNN(nn.Module):
             padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
             self.init_padding = padding.cuda() if x.is_cuda else padding
 
-        if sample:
+        if sample :
             xs = [int(y) for y in x.size()]
             padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
             padding = padding.cuda() if x.is_cuda else padding
             x = torch.cat((x, padding), 1)
 
-        ###     UP PASS     ###
+        ###      UP PASS    ###
         x = x if sample else torch.cat((x, self.init_padding), 1)
         u_list = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
@@ -142,7 +142,7 @@ class PixelCNN(nn.Module):
                 u_list += [self.downsize_u_stream[i](u_list[-1])]
                 ul_list += [self.downsize_ul_stream[i](ul_list[-1])]
 
-        ###     DOWN PASS     ###
+        ###    DOWN PASS    ###
         u = u_list.pop()
         ul = ul_list.pop()
 
@@ -151,37 +151,29 @@ class PixelCNN(nn.Module):
             u, ul = self.down_layers[i](u, ul, u_list, ul_list)
 
             # upscale (only twice)
-            if i != 2:
+            if i != 2 :
                 u = self.upsize_u_stream[i](u)
                 ul = self.upsize_ul_stream[i](ul)
 
-        final_features = F.elu(ul)
-        # Apply global average pooling
-        pooled_features = self.global_avg_pool(final_features)
-        # Flatten the pooled features
-        pooled_features = pooled_features.view(pooled_features.size(0), -1)
-        # Pass through the fully connected layer for classification
-        logits = self.fc(pooled_features)
+        x_out = self.nin_out(F.elu(ul))
 
         assert len(u_list) == len(ul_list) == 0, pdb.set_trace()
 
-        return logits  # Return logits for classification
+        return x_out
 
-    # Run model inference for classification (no changes needed here if forward is modified)
+    # Run model inference
     def infer_img(self, x, device):
         B, _, _, _ = x.size()
         inferred_loss = torch.zeros((self.num_classes, B)).to(device)
 
         # Get the loss for each class
         for i in range(self.num_classes):
-            # Run the model with each inferred label to get the logits
+            # Run the model with each inferred label to get the loss
             inferred_label = (torch.ones(B, dtype=torch.int64) * i).to(device)
-            logits = self(x, inferred_label)
-            # Calculate cross-entropy loss for each class
-            loss_fn = nn.CrossEntropyLoss(reduction='none')
-            inferred_loss[i] = loss_fn(logits, inferred_label) # Compare logits with the assumed label
+            model_output = self(x, inferred_label)
+            inferred_loss[i] = discretized_mix_logistic_loss(x, model_output, True)
 
-        # Get the minimum loss and the corresponding label (this part might not be directly meaningful for classification accuracy)
+        # Get the minimum loss and the corresponding label
         losses, labels = torch.min(inferred_loss, dim=0)
         return losses, labels
 
@@ -195,6 +187,5 @@ class random_classifier(nn.Module):
         if 'models' not in os.listdir():
             os.mkdir('models')
         torch.save(self.state_dict(), 'models/conditional_pixelcnn.pth')
-
     def forward(self, x, device):
         return torch.randint(0, self.NUM_CLASSES, (x.shape[0],)).to(device)

@@ -26,17 +26,17 @@ class nin(nn.Module):
 
 class down_shifted_conv2d(nn.Module):
     def __init__(self, num_filters_in, num_filters_out, filter_size=(2,3), stride=(1,1),
-                    shift_output_down=False, norm='weight_norm'):
+                    shift_output_down=False, norm='weight_norm'): # Added norm argument
         super(down_shifted_conv2d, self).__init__()
 
         assert norm in [None, 'batch_norm', 'weight_norm']
         self.conv = nn.Conv2d(num_filters_in, num_filters_out, filter_size, stride)
         self.shift_output_down = shift_output_down
         self.norm = norm
-        self.pad  = nn.ZeroPad2d((int((filter_size[1] - 1) / 2), # pad left
+        self.pad = nn.ZeroPad2d((int((filter_size[1] - 1) / 2), # pad left
                                   int((filter_size[1] - 1) / 2), # pad right
-                                  filter_size[0] - 1,            # pad top
-                                  0) )                           # pad down
+                                  filter_size[0] - 1,    # pad top
+                                  0) )  # pad down
 
         if norm == 'weight_norm':
             self.conv = wn(self.conv)
@@ -70,7 +70,7 @@ class down_shifted_deconv2d(nn.Module):
 
 class down_right_shifted_conv2d(nn.Module):
     def __init__(self, num_filters_in, num_filters_out, filter_size=(2,2), stride=(1,1),
-                    shift_output_right=False, norm='weight_norm'):
+                    shift_output_right=False, norm='weight_norm'): # Added norm argument
         super(down_right_shifted_conv2d, self).__init__()
 
         assert norm in [None, 'batch_norm', 'weight_norm']
