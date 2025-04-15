@@ -50,43 +50,6 @@ class PixelCNNLayer_down(nn.Module):
         return u, ul
 
 
-# Added FiLM conditioning module
-class FiLMConditioning(nn.Module):
-    """
-    Feature-wise Linear Modulation (FiLM) layer for conditional normalization.
-    Generates scaling and shifting parameters based on conditioning information.
-    """
-    def __init__(self, num_classes, num_features):
-        super(FiLMConditioning, self).__init__()
-        self.num_features = num_features
-        
-        # Linear layer to generate scaling (gamma) and shifting (beta) parameters
-        self.film_generator = nn.Linear(num_classes, num_features * 2)
-        
-    def forward(self, feature_maps, condition):
-        """
-        Args:
-            feature_maps: Feature maps to be modulated, shape [B, C, H, W]
-            condition: One-hot encoded class labels, shape [B, num_classes]
-        Returns:
-            Modulated feature maps
-        """
-        batch_size = feature_maps.size(0)
-        
-        # Generate FiLM parameters (gamma and beta)
-        film_params = self.film_generator(condition)
-        
-        # Split the parameters into gamma and beta
-        gamma, beta = torch.split(film_params, self.num_features, dim=1)
-        
-        # Reshape to apply broadcasting over spatial dimensions
-        gamma = gamma.view(batch_size, self.num_features, 1, 1)
-        beta = beta.view(batch_size, self.num_features, 1, 1)
-        
-        # Apply the FiLM transformation: gamma * x + beta
-        return gamma * feature_maps + beta
-
-
 class PixelCNN(nn.Module):
     def __init__(self, nr_resnet=5, nr_filters=80, nr_logistic_mix=10,
                     resnet_nonlinearity='concat_elu', input_channels=3, num_classes=4):
@@ -137,16 +100,6 @@ class PixelCNN(nn.Module):
         # Add the embedding layer
         self.embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
 
-        # Added: FiLM layers for the three levels of the network
-        self.film_layers = nn.ModuleList([
-            FiLMConditioning(num_classes, nr_filters),
-            FiLMConditioning(num_classes, nr_filters),
-            FiLMConditioning(num_classes, nr_filters)
-        ])
-        
-        # Added: Class embedding for one-hot encoding
-        self.class_embedding = nn.Linear(1, num_classes)
-
     # Add the embeddings to the input
     def addPositionalEmbedding(self, x, labels, img_height, img_width):
         embs = self.embedding(labels).view(-1, self.input_channels, img_height, img_width)
@@ -156,11 +109,6 @@ class PixelCNN(nn.Module):
         _, _, H, W = x.size()
         labels = labels.to(x.device)
         x = self.addPositionalEmbedding(x, labels, H, W)
-        
-        # Added: Create one-hot encoding for FiLM conditioning
-        batch_size = labels.size(0)
-        one_hot = torch.zeros(batch_size, self.num_classes, device=labels.device)
-        one_hot.scatter_(1, labels.unsqueeze(1), 1)
 
         # similar as done in the tf repo :
         if self.init_padding is not sample:
@@ -178,7 +126,6 @@ class PixelCNN(nn.Module):
         x = x if sample else torch.cat((x, self.init_padding), 1)
         u_list  = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
-        
         for i in range(3):
             # resnet block
             u_out, ul_out = self.up_layers[i](u_list[-1], ul_list[-1])
@@ -189,18 +136,10 @@ class PixelCNN(nn.Module):
                 # downscale (only twice)
                 u_list  += [self.downsize_u_stream[i](u_list[-1])]
                 ul_list += [self.downsize_ul_stream[i](ul_list[-1])]
-                
-                # Added: Apply FiLM conditioning after downscaling
-                u_list[-1] = self.film_layers[i](u_list[-1], one_hot)
-                ul_list[-1] = self.film_layers[i](ul_list[-1], one_hot)
 
         ###    DOWN PASS    ###
         u  = u_list.pop()
         ul = ul_list.pop()
-        
-        # Added: Apply FiLM conditioning at the bottleneck
-        u = self.film_layers[2](u, one_hot)
-        ul = self.film_layers[2](ul, one_hot)
 
         for i in range(3):
             # resnet block
@@ -210,10 +149,6 @@ class PixelCNN(nn.Module):
             if i != 2 :
                 u  = self.upsize_u_stream[i](u)
                 ul = self.upsize_ul_stream[i](ul)
-                
-                # Added: Apply FiLM conditioning after upscaling
-                u = self.film_layers[i](u, one_hot)
-                ul = self.film_layers[i](ul, one_hot)
 
         x_out = self.nin_out(F.elu(ul))
 
