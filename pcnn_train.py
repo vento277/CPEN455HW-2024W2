@@ -17,43 +17,38 @@ from pytorch_fid.fid_score import calculate_fid_given_paths
 
 def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, mode = 'training'):
     if mode == 'training':
+
         model.train()
     else:
         model.eval()
-        
-    deno =  args.batch_size * np.prod(args.obs) * np.log(2.)        
+
+    deno = args.batch_size * np.prod(args.obs) * np.log(2.)        
     loss_tracker = mean_tracker()
-    val_acc_tracker = mean_tracker()
-    
-    for _, item in enumerate(tqdm(data_loader)):
-        model_input, labels = item
+
+    #used gpt here to get the logic for computing the val accuracy/getting labels tensor
+    for batch_idx, item in enumerate(tqdm(data_loader)):
+        model_input, class_labels = item
         model_input = model_input.to(device)
 
-        # Check if the model is in training mode or test mode
-        if mode == 'test':
-            losses, label_preds = model.infer_img(model_input, device)
-            loss_tracker.update(torch.sum(losses).item()/deno)
-        else:
-            labels = torch.tensor([my_bidict[item] for item in labels])
-            labels = labels.to(device)
+        labels = [my_bidict[class_label] for class_label in class_labels]
+        labels_tensor = torch.tensor(labels, dtype=torch.long).to(device) #string to tensor
 
-            model_output = model(model_input, labels)
-            loss = loss_op(model_input, model_output)
-            loss_tracker.update(loss.item()/deno)
+        model_output = model(model_input, class_label=labels_tensor)
+        loss = loss_op(model_input, model_output)
+        loss_tracker.update(loss.item()/deno)
+    
+        if mode == 'training':
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-            if mode == 'training':
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            else:
-                _, label_preds = model.infer_img(model_input, device)
-                val_acc_tracker.update(torch.sum(label_preds == labels).item()/args.batch_size)
-        
+    if mode == 'val':
+        accuracy = classifier(model, data_loader, device)
+        wandb.log({mode + "-Accuracy":accuracy})
+
     if args.en_wandb:
         wandb.log({mode + "-Average-BPD" : loss_tracker.get_mean()})
         wandb.log({mode + "-epoch": epoch})
-        if mode == 'val':
-            wandb.log({"val-Accuracy": val_acc_tracker.get_mean()})
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -194,7 +189,7 @@ if __name__ == '__main__':
     args.obs = (3, 32, 32)
     input_channels = args.obs[0]
     
-    loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake)
+    loss_op   = lambda real, fake : discretized_mix_logistic_loss(real, fake, True)
     sample_op = lambda x : sample_from_discretized_mix_logistic(x, args.nr_logistic_mix)
 
     num_classes = len(my_bidict)
@@ -222,14 +217,14 @@ if __name__ == '__main__':
         
         # decrease learning rate
         scheduler.step()
-        train_or_test(model = model,
-                      data_loader = test_loader,
-                      optimizer = optimizer,
-                      loss_op = loss_op,
-                      device = device,
-                      args = args,
-                      epoch = epoch,
-                      mode = 'test')
+        # train_or_test(model = model,
+        #               data_loader = test_loader,
+        #               optimizer = optimizer,
+        #               loss_op = loss_op,
+        #               device = device,
+        #               args = args,
+        #               epoch = epoch,
+        #               mode = 'test')
         
         train_or_test(model = model,
                       data_loader = val_loader,
@@ -239,31 +234,18 @@ if __name__ == '__main__':
                       args = args,
                       epoch = epoch,
                       mode = 'val')
-        
-        val_accuracy = classifier(model, val_loader, device)
-        if args.en_wandb:
-          wandb.log({"Validation Accuracy": val_accuracy, "epoch": epoch + 1})
-
         if epoch % args.sampling_interval == 0:
             print('......sampling......')
-            # generate random labels to feed into samples
-            # rand_labels = torch.randint(low=0, high=len(my_bidict), size=(args.sample_batch_size,)).to(device=next(model.parameters()).device)
-            
-            # generate ordered labels for each class section
-            section_size = args.sample_batch_size // 4
-            ordered_labels = torch.cat([
-                torch.full((section_size,), 0, dtype=torch.long), 
-                torch.full((section_size,), 1, dtype=torch.long), 
-                torch.full((section_size,), 2, dtype=torch.long),  
-                torch.full((section_size,), 3, dtype=torch.long)   
-            ])
+            #from gpt to get conditional sampling to sample
+            batch_size = args.sample_batch_size
 
-            # added labels tensor as param
-            sample_t = sample(model, args.sample_batch_size, args.obs, sample_op, ordered_labels)
-            
-            sample_t = rescaling_inv(sample_t)
-            save_images(sample_t, args.sample_dir)
-            sample_result = wandb.Image(sample_t, caption="epoch {}".format(epoch))
+            for class_id in range(len(my_bidict)):
+                labels_tensor = torch.full((batch_size, ), class_id, dtype=torch.long, device=device)
+               # print("sampling for class", class_id)
+                sample_t = sample(model, batch_size, args.obs, sample_op, class_label=labels_tensor)
+                sample_t = rescaling_inv(sample_t)
+                save_images(sample_t, args.sample_dir, label=my_bidict.inverse[class_id])
+                sample_result = wandb.Image(sample_t, caption=f"epoch {epoch}".format(epoch))
             
             gen_data_dir = args.sample_dir
             ref_data_dir = args.data_dir +'/test'
@@ -277,9 +259,9 @@ if __name__ == '__main__':
             if args.en_wandb:
                 wandb.log({"samples": sample_result,
                             "FID": fid_score})
-
+        
         if (epoch + 1) % args.save_interval == 0: 
             if not os.path.exists("models"):
                 os.makedirs("models")
+            #torch.save(model.state_dict(), 'models/{}_{}.pth'.format(model_name, epoch))
             torch.save(model.state_dict(), 'models/conditional_pixelcnn.pth'.format(model_name, epoch))
-            # torch.save(model.state_dict(), 'models/{}_{}.pth'.format(model_name, epoch))
