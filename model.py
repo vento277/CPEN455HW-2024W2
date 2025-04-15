@@ -169,7 +169,7 @@ class PixelCNN(nn.Module):
 
         # Get the minimum loss and the corresponding label
         losses, labels = torch.min(inferred_loss, dim=0)
-        return losses, labels, inferred_loss
+        return losses, labels
     
 class random_classifier(nn.Module):
     def __init__(self, NUM_CLASSES):
