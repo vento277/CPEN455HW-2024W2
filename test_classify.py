@@ -62,7 +62,7 @@ def classify(model, data_loader, device, csv_test_file, csv_output_file_name, fi
     img_idx = 0
 
     for batch_idx, item in enumerate(tqdm(data_loader)):
-        model_input, categories, _ = item
+        model_input, categories = item
         model_input = model_input.to(device)
         answer, logit = get_label(model, model_input, device)
         logits.append(logit.T.cpu().detach().numpy())
