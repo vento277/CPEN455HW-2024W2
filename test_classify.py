@@ -35,7 +35,7 @@ def get_label(model, model_input, device):
 
         # Here we use discretized_mix_logistic_loss in classification mode because we care about loss not summed over
         # the batch, we want to know which one would minimize loss so we can tell which class is the most likely
-        loss_from_log_likelihood[possible_class, :] = discretized_mix_logistic_loss(model_input, answer, training=False)
+        loss_from_log_likelihood[possible_class, :] = discretized_mix_logistic_loss(model_input, answer, False)
 
     # Need to minimize loss along class dimension to get best class for each image in the batch
     return torch.argmin(loss_from_log_likelihood, dim=0), loss_from_log_likelihood
