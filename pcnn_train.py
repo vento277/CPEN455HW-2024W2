@@ -31,6 +31,7 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
         model_input = model_input.to(device)
 
         labels = [my_bidict[class_label] for class_label in class_labels]
+        labels = labels.to(device)
         labels_tensor = torch.tensor(labels, dtype=torch.long).to(device) #string to tensor
 
         model_output = model(model_input, class_label=labels_tensor)
