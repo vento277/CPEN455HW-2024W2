@@ -51,12 +51,14 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
                 loss.backward()
                 optimizer.step()
             else:
-                _, label_preds, _ = model.infer_img(model_input, device)
+                _, label_preds = model.infer_img(model_input, device)
                 val_acc_tracker.update(torch.sum(label_preds == labels).item()/args.batch_size)
         
     if args.en_wandb:
         wandb.log({mode + "-Average-BPD" : loss_tracker.get_mean()})
         wandb.log({mode + "-epoch": epoch})
+        if mode == 'val':
+            wandb.log({"val-Accuracy": val_acc_tracker.get_mean()})
 
 
 if __name__ == '__main__':
@@ -243,15 +245,11 @@ if __name__ == '__main__':
                       args = args,
                       epoch = epoch,
                       mode = 'val')
-        
-        val_accuracy = classifier(model, val_loader, device)
-        if args.en_wandb:
-          wandb.log({"Validation Accuracy": val_accuracy, "epoch": epoch + 1})
 
         if epoch % args.sampling_interval == 0:
             print('......sampling......')
             # generate random labels to feed into samples
-            # rand_labels = torch.randint(low=0, high=len(my_bidict), size=(args.sample_batch_size,)).to(device=next(model.parameters()).device)
+            rand_labels = torch.randint(low=0, high=len(my_bidict), size=(args.sample_batch_size,)).to(device=next(model.parameters()).device)
             
             # generate ordered labels for each class section
             section_size = args.sample_batch_size // 4
@@ -263,7 +261,8 @@ if __name__ == '__main__':
             ])
 
             # added labels tensor as param
-            sample_t = sample(model, args.sample_batch_size, args.obs, sample_op, ordered_labels)
+            # sample_t = sample(model, args.sample_batch_size, args.obs, sample_op, ordered_labels)
+            sample_t = sample(model, args.sample_batch_size, args.obs, sample_op, rand_labels)
             
             sample_t = rescaling_inv(sample_t)
             save_images(sample_t, args.sample_dir)

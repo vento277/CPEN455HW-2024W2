@@ -107,7 +107,6 @@ class PixelCNN(nn.Module):
 
     def forward(self, x, labels, sample=False):
         _, _, H, W = x.size()
-        labels = labels.to(x.device)
         x = self.addPositionalEmbedding(x, labels, H, W)
 
         # similar as done in the tf repo :
