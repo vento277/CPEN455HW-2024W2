@@ -11,7 +11,6 @@ from dataset import *
 from tqdm import tqdm
 from pprint import pprint
 import argparse
-from classification_evaluation import *
 from pytorch_fid.fid_score import calculate_fid_given_paths
 
 
@@ -24,11 +23,6 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
     deno =  args.batch_size * np.prod(args.obs) * np.log(2.)        
     loss_tracker = mean_tracker()
     val_acc_tracker = mean_tracker()
-
-    my_bidict = bidict({'Class0': 0, 
-                'Class1': 1,
-                'Class2': 2,
-                'Class3': 3})
     
     for _, item in enumerate(tqdm(data_loader)):
         model_input, labels = item
@@ -36,7 +30,7 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
 
         # Check if the model is in training mode or test mode
         if mode == 'test':
-            losses, label_preds, _ = model.infer_img(model_input, device)
+            losses, label_preds = model.infer_img(model_input, device)
             loss_tracker.update(torch.sum(losses).item()/deno)
         else:
             labels = torch.tensor([my_bidict[item] for item in labels])
@@ -51,7 +45,7 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
                 loss.backward()
                 optimizer.step()
             else:
-                _, label_preds, _ = model.infer_img(model_input, device)
+                _, label_preds = model.infer_img(model_input, device)
                 val_acc_tracker.update(torch.sum(label_preds == labels).item()/args.batch_size)
         
     if args.en_wandb:
@@ -59,7 +53,6 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
         wandb.log({mode + "-epoch": epoch})
         if mode == 'val':
             wandb.log({"val-Accuracy": val_acc_tracker.get_mean()})
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -89,11 +82,11 @@ if __name__ == '__main__':
                         help='Observation shape')
     
     # model
-    parser.add_argument('-q', '--nr_resnet', type=int, default=1,
+    parser.add_argument('-q', '--nr_resnet', type=int, default=5,
                         help='Number of residual blocks per stage of the model')
-    parser.add_argument('-n', '--nr_filters', type=int, default=40,
+    parser.add_argument('-n', '--nr_filters', type=int, default=160,
                         help='Number of filters to use across the model. Higher = larger model.')
-    parser.add_argument('-m', '--nr_logistic_mix', type=int, default=5,
+    parser.add_argument('-m', '--nr_logistic_mix', type=int, default=10,
                         help='Number of logistic components in the mixture. Higher = more flexible model')
     parser.add_argument('-l', '--lr', type=float,
                         default=0.0002, help='Base learning rate')
@@ -142,10 +135,8 @@ if __name__ == '__main__':
 
     #set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    #Reminder: if you have patience to read code line by line, you should notice this comment. here is the reason why we set num_workers to 0:
-    #In order to avoid pickling errors with the dataset on different machines, we set num_workers to 0.
-    #If you are using ubuntu/linux/colab, and find that loading data is too slow, you can set num_workers to 1 or even bigger.
-    kwargs = {'num_workers':1, 'pin_memory':True, 'drop_last':True}
+    kwargs = {'num_workers':0, 'pin_memory':True, 'drop_last':True}
+    print('Using device:', device)
 
     # set data
     if "mnist" in args.dataset:
@@ -245,25 +236,11 @@ if __name__ == '__main__':
                       args = args,
                       epoch = epoch,
                       mode = 'val')
-
+        
         if epoch % args.sampling_interval == 0:
             print('......sampling......')
-            # generate random labels to feed into samples
-            rand_labels = torch.randint(low=0, high=len(my_bidict), size=(args.sample_batch_size,)).to(device=next(model.parameters()).device)
-            
-            # generate ordered labels for each class section
-            section_size = args.sample_batch_size // 4
-            ordered_labels = torch.cat([
-                torch.full((section_size,), 0, dtype=torch.long), 
-                torch.full((section_size,), 1, dtype=torch.long), 
-                torch.full((section_size,), 2, dtype=torch.long),  
-                torch.full((section_size,), 3, dtype=torch.long)   
-            ])
-
-            # added labels tensor as param
-            # sample_t = sample(model, args.sample_batch_size, args.obs, sample_op, ordered_labels)
-            sample_t = sample(model, args.sample_batch_size, args.obs, sample_op, rand_labels)
-            
+            labels = torch.randint(0, num_classes, (args.sample_batch_size,)).to(next(model.parameters()).device)
+            sample_t = sample(model, args.sample_batch_size, args.obs, sample_op, labels=labels)
             sample_t = rescaling_inv(sample_t)
             save_images(sample_t, args.sample_dir)
             sample_result = wandb.Image(sample_t, caption="epoch {}".format(epoch))
@@ -280,9 +257,9 @@ if __name__ == '__main__':
             if args.en_wandb:
                 wandb.log({"samples": sample_result,
                             "FID": fid_score})
-
+        
         if (epoch + 1) % args.save_interval == 0: 
             if not os.path.exists("models"):
                 os.makedirs("models")
-            torch.save(model.state_dict(), 'models/conditional_pixelcnn.pth'.format(model_name, epoch))
             # torch.save(model.state_dict(), 'models/{}_{}.pth'.format(model_name, epoch))
+            torch.save(model.state_dict(), 'models/conditional_pixelcnn.pth'.format(model_name, epoch))
