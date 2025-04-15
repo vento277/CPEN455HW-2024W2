@@ -113,7 +113,7 @@ if __name__ == '__main__':
     #Write your code here
     #You should replace the random classifier with your trained model
     #Begin of your code
-    model = PixelCNN(nr_resnet=1, nr_filters=64, input_channels=3, nr_logistic_mix=5, num_classes=NUM_CLASSES)
+    model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=5, num_classes=NUM_CLASSES)
     #End of your code
     
     model = model.to(device)
