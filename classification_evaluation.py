@@ -107,3 +107,5 @@ if __name__ == '__main__':
     
     acc = classifier(model = model, data_loader = dataloader, device = device)
     print(f"Accuracy: {acc}")
+        
+        

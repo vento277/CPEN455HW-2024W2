@@ -127,7 +127,7 @@ class PixelCNN(nn.Module):
             padding = padding.cuda() if x.is_cuda else padding
             x = torch.cat((x, padding), 1)
 
-        ###      UP PASS    ###
+        ### Â  Â  Â UP PASS Â  Â ###
         x = x if sample else torch.cat((x, self.init_padding), 1)
         u_list = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
@@ -142,7 +142,7 @@ class PixelCNN(nn.Module):
                 u_list += [self.downsize_u_stream[i](u_list[-1])]
                 ul_list += [self.downsize_ul_stream[i](ul_list[-1])]
 
-        ###    DOWN PASS    ###
+        ### Â  Â DOWN PASS Â  Â ###
         u = u_list.pop()
         ul = ul_list.pop()
 

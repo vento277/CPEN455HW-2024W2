@@ -58,3 +58,4 @@ if __name__ == "__main__":
         print("Dimension {:d} fails!".format(192))
         
     print("Average fid score: {}".format(fid_score))
+
