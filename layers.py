@@ -26,17 +26,17 @@ class nin(nn.Module):
 
 class down_shifted_conv2d(nn.Module):
     def __init__(self, num_filters_in, num_filters_out, filter_size=(2,3), stride=(1,1),
-                    shift_output_down=False, norm='weight_norm'): # Added norm argument
+                    shift_output_down=False, norm='weight_norm'):
         super(down_shifted_conv2d, self).__init__()
 
         assert norm in [None, 'batch_norm', 'weight_norm']
         self.conv = nn.Conv2d(num_filters_in, num_filters_out, filter_size, stride)
         self.shift_output_down = shift_output_down
         self.norm = norm
-        self.pad = nn.ZeroPad2d((int((filter_size[1] - 1) / 2), # pad left
+        self.pad  = nn.ZeroPad2d((int((filter_size[1] - 1) / 2), # pad left
                                   int((filter_size[1] - 1) / 2), # pad right
-                                  filter_size[0] - 1,    # pad top
-                                  0) )  # pad down
+                                  filter_size[0] - 1,            # pad top
+                                  0) )                           # pad down
 
         if norm == 'weight_norm':
             self.conv = wn(self.conv)
@@ -70,7 +70,7 @@ class down_shifted_deconv2d(nn.Module):
 
 class down_right_shifted_conv2d(nn.Module):
     def __init__(self, num_filters_in, num_filters_out, filter_size=(2,2), stride=(1,1),
-                    shift_output_right=False, norm='weight_norm'): # Added norm argument
+                    shift_output_right=False, norm='weight_norm'):
         super(down_right_shifted_conv2d, self).__init__()
 
         assert norm in [None, 'batch_norm', 'weight_norm']
@@ -116,7 +116,7 @@ skip connection parameter : 0 = no skip connection
                             2 = skip connection where skip input size === 2 * input size
 '''
 class gated_resnet(nn.Module):
-    def __init__(self, num_filters, conv_op, nonlinearity=concat_elu, skip_connection=0):
+    def __init__(self, num_filters, conv_op, nonlinearity=concat_elu, skip_connection=0, cond_dim=None):
         super(gated_resnet, self).__init__()
         self.skip_connection = skip_connection
         self.nonlinearity = nonlinearity
@@ -125,12 +125,33 @@ class gated_resnet(nn.Module):
         if skip_connection != 0 :
             self.nin_skip = nin(2 * skip_connection * num_filters, num_filters)
 
-        self.dropout = nn.Dropout2d(0.5)
-        self.conv_out = conv_op(2 * num_filters, 2 * num_filters)
+        self.dropout = nn.Dropout2d(0.1)
+        self.conv_out = conv_op(2 * num_filters, 2 * num_filters) #C for gamma and C for beta
+
+        #used gpt here to add mlp here for embedding FiLM params
+        self.film_mlp = nn.Sequential(
+            nn.Linear(cond_dim, cond_dim,),
+            nn.ReLU(inplace=True),
+            nn.Linear(cond_dim, 2 * num_filters)
+        )
 
 
-    def forward(self, og_x, a=None):
+    def forward(self, og_x, a=None, cond_vec=None):
         x = self.conv_input(self.nonlinearity(og_x))
+
+        #apply FiLM if there is a conditioning vector
+        if cond_vec is not None:
+            
+            gamma_beta = self.film_mlp(cond_vec)  #[B, 2*num_filters]
+
+            gamma, beta = gamma_beta.chunk(2, dim=1)
+            #reshape to [B,C,1,1]
+            gamma = gamma.view(-1, x.size(1), 1, 1)
+            beta = beta.view(-1, x.size(1), 1, 1)
+            #print(f"FiLM γ mean/std: {gamma.mean().item():.3f}/{gamma.std().item():.3f}, "
+            #f"β mean/std: {beta.mean().item():.3f}/{beta.std().item():.3f}")
+            x = gamma * x + beta
+
         if a is not None :
             x += self.nin_skip(self.nonlinearity(a))
         x = self.nonlinearity(x)
