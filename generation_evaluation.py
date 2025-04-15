@@ -44,7 +44,7 @@ if __name__ == "__main__":
     model = model.eval()
     #End of your code
 
-    my_sample(model=model, gen_data_dir=gen_data_dir, device=device)
+    my_sample(model=model, gen_data_dir=gen_data_dir)
     
     paths = [gen_data_dir, ref_data_dir]
     print("#generated images: {:d}, #reference images: {:d}".format(

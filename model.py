@@ -19,12 +19,24 @@ class PixelCNNLayer_up(nn.Module):
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
                                                         resnet_nonlinearity, skip_connection=1)
                                                 for _ in range(nr_resnet)])
+        
+        # Added middle fusion layers
+        self.middle_fusion = nn.ModuleList([
+            nn.Conv2d(nr_filters * 2, nr_filters, kernel_size=1)
+            for _ in range(nr_resnet)
+        ])
 
     def forward(self, u, ul):
         u_list, ul_list = [], []
 
         for i in range(self.nr_resnet):
             u = self.u_stream[i](u)
+            
+            # Apply middle fusion - combine information from both streams
+            if i > 0:  # Skip fusion for the first layer
+                fusion = self.middle_fusion[i](torch.cat([u, ul], dim=1))
+                u = u + 0.1 * fusion  # Add fusion with small weight to avoid dominating the original features
+            
             ul = self.ul_stream[i](ul, a=u)
             u_list += [u]
             ul_list += [ul]
@@ -45,9 +57,20 @@ class PixelCNNLayer_down(nn.Module):
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
                                                         resnet_nonlinearity, skip_connection=2)
                                                 for _ in range(nr_resnet)])
+        
+        # Added middle fusion layers
+        self.middle_fusion = nn.ModuleList([
+            nn.Conv2d(nr_filters * 2, nr_filters, kernel_size=1)
+            for _ in range(nr_resnet)
+        ])
 
     def forward(self, u, ul, u_list, ul_list):
         for i in range(self.nr_resnet):
+            # Apply middle fusion before standard processing
+            if i > 0:  # Skip fusion for the first layer
+                fusion = self.middle_fusion[i](torch.cat([u, ul], dim=1))
+                u = u + 0.1 * fusion  # Add fusion with small weight
+            
             u = self.u_stream[i](u, a=u_list.pop())
             ul = self.ul_stream[i](ul, a=torch.cat((u, ul_list.pop()), 1))
 
@@ -98,6 +121,14 @@ class PixelCNN(nn.Module):
                                         down_right_shifted_conv2d(input_channels + 1, nr_filters,
                                                                     filter_size=(2,1), shift_output_right=True, norm='batch_norm')]) # Added batch norm
 
+        # Added middle fusion layer between u and ul streams at bottleneck
+        self.bottleneck_fusion = nn.Sequential(
+            nn.Conv2d(nr_filters * 2, nr_filters, kernel_size=1),
+            nn.BatchNorm2d(nr_filters),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout_p)
+        )
+
         num_mix = 3 if self.input_channels == 1 else 10
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
@@ -127,7 +158,7 @@ class PixelCNN(nn.Module):
             padding = padding.cuda() if x.is_cuda else padding
             x = torch.cat((x, padding), 1)
 
-        ### Â  Â  Â UP PASS Â  Â ###
+        ### UP PASS ###
         x = x if sample else torch.cat((x, self.init_padding), 1)
         u_list = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
@@ -142,7 +173,22 @@ class PixelCNN(nn.Module):
                 u_list += [self.downsize_u_stream[i](u_list[-1])]
                 ul_list += [self.downsize_ul_stream[i](ul_list[-1])]
 
-        ### Â  Â DOWN PASS Â  Â ###
+        ### MIDDLE FUSION AT BOTTLENECK ###
+        # Apply fusion at the bottleneck between up and down passes
+        u = u_list[-1]
+        ul = ul_list[-1]
+        
+        # Create fusion features
+        fusion_features = self.bottleneck_fusion(torch.cat([u, ul], dim=1))
+        
+        # Apply fusion with residual connection
+        u = u + 0.2 * fusion_features  # Add fusion with weight to avoid dominating original features
+        ul = ul + 0.2 * fusion_features
+        
+        u_list[-1] = u
+        ul_list[-1] = ul
+
+        ### DOWN PASS ###
         u = u_list.pop()
         ul = ul_list.pop()
 
