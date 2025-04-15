@@ -16,15 +16,17 @@ import torch
 # This function should save the generated images to the gen_data_dir, which is fixed as 'samples'
 # Begin of your code
 sample_op = lambda x : sample_from_discretized_mix_logistic(x, 5)
-def my_sample(model, gen_data_dir, sample_batch_size = 25, obs = (3,32,32), sample_op = sample_op):
+def my_sample(model, gen_data_dir, device, sample_batch_size=25, obs=(3,32,32)):
+    model.eval()  
     for label in my_bidict:
         print(f"Label: {label}")
-        #generate images for each label, each label has 25 images
-        label_tensor = torch.full((sample_batch_size,), my_bidict[label], dtype=torch.long, device=device)  #same with classification, create a label tensor to feed into sample
-        sample_t = sample(model, sample_batch_size, obs, sample_op, class_label=label_tensor)
-        sample_t = rescaling_inv(sample_t)
-        save_images(sample_t, os.path.join(gen_data_dir), label=label)
-    pass
+        labels = torch.full((sample_batch_size,), my_bidict[label], dtype=torch.long, device=device)
+        input_tensor = torch.zeros(sample_batch_size, *obs, device=device)
+        with torch.no_grad():
+            output = model(input_tensor, labels=labels, sample=True)
+            images = sample_from_discretized_mix_logistic(output, 5)  
+            images = rescaling_inv(images)   
+            save_images(images, gen_data_dir, label=label)
 # End of your code
 
 if __name__ == "__main__":
@@ -37,7 +39,7 @@ if __name__ == "__main__":
         os.makedirs(gen_data_dir)
     #Begin of your code
     #Load your model and generate images in the gen_data_dir
-    model = PixelCNN(nr_resnet=1, nr_filters=50, input_channels=3, nr_logistic_mix=5)
+    model = PixelCNN(nr_resnet=1, nr_filters=100, input_channels=3, nr_logistic_mix=5)
     model.load_state_dict(torch.load('models/conditional_pixelcnn.pth'))
     model = model.to(device)
     model = model.eval()
