@@ -43,7 +43,7 @@ class CPEN455Dataset(Dataset):
         if category in my_bidict.values():
             category_name = my_bidict.inverse[category]
         else:
-            category_name = "Unknown"
+            category_name = "Class0"
         # print(img_path)
         image = read_image(img_path)  # Reads the image as a tensor
         image = image.type(torch.float32) / 255.  # Normalize to [0, 1]
