@@ -52,7 +52,6 @@ def classify(model, data_loader, device, csv_test_file, csv_output_file_name, fi
         for row in reader:
             # Should ignore the -1 dummy label and also drop the test/ prefix
             img_name = row[0].split(',')[0]
-            img_name = img_name.replace('test/', '')
 
             img_names.append(img_name)
 
@@ -73,9 +72,6 @@ def classify(model, data_loader, device, csv_test_file, csv_output_file_name, fi
     # Prepare CSV for submission
     with open(csv_output_file_name, mode='w', newline='') as file:
         writer = csv.writer(file)
-
-        # Write header
-        writer.writerow(['id' , 'label'])
         
         # Write classes
         for row in img_names:
