@@ -105,6 +105,7 @@ class PixelCNN(nn.Module):
     def forward(self, x, class_label = None, sample=False):
 
         B, C, H, W = x.shape 
+        class_labels = class_labels.to(x.device)
 
             #class_embedding = self.embedding(class_label)
             #Reshape embedding for broadcasting
