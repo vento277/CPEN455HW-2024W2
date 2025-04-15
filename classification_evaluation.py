@@ -21,33 +21,27 @@ import csv
 NUM_CLASSES = len(my_bidict)
 
 #TODO: Begin of your code
-# classification function to convert the output of conditional PixelCNN++ to the prediction labels when given a new image
-def classify(model, model_input, device):
-    batch_size = model_input.shape[0]
-
-    # replicate input for number of classes
-    model_input = model_input.repeat(NUM_CLASSES,1,1,1)
-
-    # lookup tensor of potential class labels that can be guessed for each image in the batch
-    # class label is repeated to match a batch of data; for parallel processing
-    # eg.) when batch_size=3, num_classes=4
-    # shape: ([0, 0, 0, 1, 1, 1, 2, 2, 2])
-    batched_labels = torch.arange(NUM_CLASSES).repeat_interleave(batch_size)
+def classify(model, input_images, device):
+    num_samples = input_images.shape[0]
+    repeated_input = input_images.repeat(NUM_CLASSES, 1, 1, 1) ## This creates a larger batch where each original image is repeated for every possible class.
+    batched_labels = torch.arange(NUM_CLASSES).repeat_interleave(num_samples).to(device) ## Create a tensor of labels, where each class index (from 0 to NUM_CLASSES-1) is repeated 'num_samples' times. 
+    model_outputs = model(repeated_input, batched_labels) ## Pass the repeated input and the corresponding batched labels through the model.
     
-    # generate output for each class label
-    model_out = model(model_input, batched_labels)
-
-    # choice of loss function was given from piazza/ TA office hours
-    logits = discretized_mix_logistic_loss(model_input, model_out, sum_over_batch=False).view(NUM_CLASSES, batch_size).permute(1, 0)
+    # Calculate the loss for each combination of input image and class label.
+    # 'sum_over_batch=False' ensures that the loss is calculated per sample.
+    class_wise_losses = discretized_mix_logistic_loss(repeated_input, model_outputs, sum_over_batch=False).view(NUM_CLASSES, num_samples).permute(1, 0)
     
-    # minimize logistic loss
-    losses, pred_labels = torch.min(logits, dim=1)
+    # Find the minimum loss for each image across all classes (dimension 1) and the index of that minimum loss, which represents the predicted class label.
+    min_losses, predicted_labels = torch.min(class_wise_losses, dim=1)
 
-    return logits, losses, pred_labels
+    return class_wise_losses, min_losses, predicted_labels
 
 def get_label(model, model_input, device):
-    # changed to predicted
-    logits, losses, pred_labels = classify(model, model_input, device)
+    # Write your code here, replace the random classifier with your trained model
+    # and return the predicted label, which is a tensor of shape (batch_size,)
+
+    # Call the classify function to get the predictions. We only need the predicted labels.
+    _, _, pred_labels = classify(model, model_input, device)
     return pred_labels
 # End of your code
 
@@ -64,7 +58,6 @@ def classifier(model, data_loader, device):
         acc_tracker.update(correct_num.item(), model_input.shape[0])
     
     return acc_tracker.get_ratio()
-        
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

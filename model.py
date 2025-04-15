@@ -97,18 +97,26 @@ class PixelCNN(nn.Module):
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Add the embedding layer
+        # Add: Bmbedding layer
         self.embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
 
-    # Add the embeddings to the input
-    def addPositionalEmbedding(self, x, labels, img_height, img_width):
-        embs = self.embedding(labels).view(-1, self.input_channels, img_height, img_width)
-        return x + embs
+    # Add: Global class conditioning the input.
+    def global_class_cond(self, x, labels, img_height, img_width):
+        # Get the embedding for the given class labels.
+        embds = self.embedding(labels)
+
+        # Reshape the embeddings to have the same spatial dimensions as the input image 'x'.
+        # The '-1' in the view operation infers the first dimension size based on the other dimensions.
+        embds = embds.view(-1, self.input_channels, img_height, img_width)
+
+        # Add the reshaped class embeddings to the input tensor 'x'.
+        output = x + embds
+        return output
 
     def forward(self, x, labels, sample=False):
         _, _, H, W = x.size()
         labels = labels.to(x.device)
-        x = self.addPositionalEmbedding(x, labels, H, W)
+        x = self.global_class_cond(x, labels, H, W)
 
         # similar as done in the tf repo :
         if self.init_padding is not sample:
@@ -155,22 +163,6 @@ class PixelCNN(nn.Module):
         assert len(u_list) == len(ul_list) == 0, pdb.set_trace()
 
         return x_out
-    
-    # Run model inference
-    def infer_img(self, x, device):
-        B, _, _, _ = x.size()
-        inferred_loss = torch.zeros((self.num_classes, B)).to(device)
-
-        # Get the loss for each class
-        for i in range(self.num_classes):
-            # Run the model with each inferred label to get the loss
-            inferred_label = (torch.ones(B, dtype=torch.int64) * i).to(device)
-            model_output = self(x, inferred_label)
-            inferred_loss[i] = discretized_mix_logistic_loss(x, model_output, True)
-
-        # Get the minimum loss and the corresponding label
-        losses, labels = torch.min(inferred_loss, dim=0)
-        return losses, labels
     
 class random_classifier(nn.Module):
     def __init__(self, NUM_CLASSES):

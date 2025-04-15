@@ -179,7 +179,7 @@ def right_shift(x, pad=None):
     return pad(x)
 
 
-# added labels as a param for conditional sampling
+# Labels have been added for conditional CNN
 def sample(model, sample_batch_size, obs, sample_op, labels):
     model.train(False)
     with torch.no_grad():
