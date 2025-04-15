@@ -23,26 +23,21 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
         
     deno =  args.batch_size * np.prod(args.obs) * np.log(2.)        
     loss_tracker = mean_tracker()
-
-    my_bidict = bidict({'Class0': 0, 
-                'Class1': 1,
-                'Class2': 2,
-                'Class3': 3})
+    val_acc_tracker = mean_tracker()
     
-    # change from item to (model_input, labels) to iterate with labels 
-    for batch_idx, item in enumerate(tqdm(data_loader)):
-        
-        # fetch both model_input and category name from dataset item
-        model_input, category_names = item
+    for _, item in enumerate(tqdm(data_loader)):
+        model_input, labels = item
         model_input = model_input.to(device)
-                
-        # create new tensor "categories"
-        if mode == 'training' or mode == 'val':
-            # convert category_name from tuple to a torch tensor
-            categories = torch.tensor([my_bidict[cat] for cat in category_names], dtype=torch.int64).to(device)
-            
-            # pass both inputs and labels to the model as param
-            model_output = model(model_input, categories)
+
+        # Check if the model is in training mode or test mode
+        if mode == 'test':
+            losses, label_preds = model.infer_img(model_input, device)
+            loss_tracker.update(torch.sum(losses).item()/deno)
+        else:
+            labels = torch.tensor([my_bidict[item] for item in labels])
+            labels = labels.to(device)
+
+            model_output = model(model_input, labels)
             loss = loss_op(model_input, model_output)
             loss_tracker.update(loss.item()/deno)
 
@@ -50,19 +45,15 @@ def train_or_test(model, data_loader, optimizer, loss_op, device, args, epoch, m
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-            
-        else:
-            # calculate loss during 'test'
-            logits, losses, pred_labels = classify(model, model_input, device)
-            loss_tracker.update(torch.sum(losses).item()/deno)
-
-        if args.en_wandb:
-            wandb.log({mode + "-Average-BPD" : loss_tracker.get_mean()})
-            wandb.log({mode + "-epoch": epoch})
+            else:
+                _, label_preds = model.infer_img(model_input, device)
+                val_acc_tracker.update(torch.sum(label_preds == labels).item()/args.batch_size)
         
     if args.en_wandb:
         wandb.log({mode + "-Average-BPD" : loss_tracker.get_mean()})
         wandb.log({mode + "-epoch": epoch})
+        if mode == 'val':
+            wandb.log({"val-Accuracy": val_acc_tracker.get_mean()})
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -231,14 +222,14 @@ if __name__ == '__main__':
         
         # decrease learning rate
         scheduler.step()
-        # train_or_test(model = model,
-        #               data_loader = test_loader,
-        #               optimizer = optimizer,
-        #               loss_op = loss_op,
-        #               device = device,
-        #               args = args,
-        #               epoch = epoch,
-        #               mode = 'test')
+        train_or_test(model = model,
+                      data_loader = test_loader,
+                      optimizer = optimizer,
+                      loss_op = loss_op,
+                      device = device,
+                      args = args,
+                      epoch = epoch,
+                      mode = 'test')
         
         train_or_test(model = model,
                       data_loader = val_loader,

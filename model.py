@@ -1,6 +1,10 @@
 import torch.nn as nn
 from layers import *
-
+import torch
+import torch.nn.functional as F
+from torch.nn.parameter import Parameter
+import os
+from torch.autograd import Variable
 
 class PixelCNNLayer_up(nn.Module):
     def __init__(self, nr_resnet, nr_filters, resnet_nonlinearity):
@@ -8,21 +12,21 @@ class PixelCNNLayer_up(nn.Module):
         self.nr_resnet = nr_resnet
         # stream from pixels above
         self.u_stream = nn.ModuleList([gated_resnet(nr_filters, down_shifted_conv2d,
-                                        resnet_nonlinearity, skip_connection=0)
-                                            for _ in range(nr_resnet)])
+                                                        resnet_nonlinearity, skip_connection=0)
+                                                for _ in range(nr_resnet)])
 
         # stream from pixels above and to thes left
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
-                                        resnet_nonlinearity, skip_connection=1)
-                                            for _ in range(nr_resnet)])
+                                                        resnet_nonlinearity, skip_connection=1)
+                                                for _ in range(nr_resnet)])
 
     def forward(self, u, ul):
         u_list, ul_list = [], []
 
         for i in range(self.nr_resnet):
-            u  = self.u_stream[i](u)
+            u = self.u_stream[i](u)
             ul = self.ul_stream[i](ul, a=u)
-            u_list  += [u]
+            u_list += [u]
             ul_list += [ul]
 
         return u_list, ul_list
@@ -33,26 +37,26 @@ class PixelCNNLayer_down(nn.Module):
         super(PixelCNNLayer_down, self).__init__()
         self.nr_resnet = nr_resnet
         # stream from pixels above
-        self.u_stream  = nn.ModuleList([gated_resnet(nr_filters, down_shifted_conv2d,
-                                        resnet_nonlinearity, skip_connection=1)
-                                            for _ in range(nr_resnet)])
+        self.u_stream = nn.ModuleList([gated_resnet(nr_filters, down_shifted_conv2d,
+                                                        resnet_nonlinearity, skip_connection=1)
+                                                for _ in range(nr_resnet)])
 
         # stream from pixels above and to thes left
         self.ul_stream = nn.ModuleList([gated_resnet(nr_filters, down_right_shifted_conv2d,
-                                        resnet_nonlinearity, skip_connection=2)
-                                            for _ in range(nr_resnet)])
+                                                        resnet_nonlinearity, skip_connection=2)
+                                                for _ in range(nr_resnet)])
 
     def forward(self, u, ul, u_list, ul_list):
         for i in range(self.nr_resnet):
-            u  = self.u_stream[i](u, a=u_list.pop())
+            u = self.u_stream[i](u, a=u_list.pop())
             ul = self.ul_stream[i](ul, a=torch.cat((u, ul_list.pop()), 1))
 
         return u, ul
 
 
 class PixelCNN(nn.Module):
-    def __init__(self, nr_resnet=5, nr_filters=80, nr_logistic_mix=10,
-                    resnet_nonlinearity='concat_elu', input_channels=3, num_classes=4):
+    def __init__(self, nr_resnet=7, nr_filters=128, nr_logistic_mix=10,
+                         resnet_nonlinearity='concat_elu', input_channels=3, num_classes=4, dropout_p=0.3): # Increased nr_resnet and nr_filters, added dropout_p
         super(PixelCNN, self).__init__()
         if resnet_nonlinearity == 'concat_elu' :
             self.resnet_nonlinearity = lambda x : concat_elu(x)
@@ -64,72 +68,51 @@ class PixelCNN(nn.Module):
         self.input_channels = input_channels
         self.nr_logistic_mix = nr_logistic_mix
         self.right_shift_pad = nn.ZeroPad2d((1, 0, 0, 0))
-        self.down_shift_pad  = nn.ZeroPad2d((0, 0, 1, 0))
+        self.down_shift_pad = nn.ZeroPad2d((0, 0, 1, 0))
+        self.dropout_p = dropout_p # Store dropout probability
 
         down_nr_resnet = [nr_resnet] + [nr_resnet + 1] * 2
         self.down_layers = nn.ModuleList([PixelCNNLayer_down(down_nr_resnet[i], nr_filters,
-                                                self.resnet_nonlinearity) for i in range(3)])
+                                                                    self.resnet_nonlinearity) for i in range(3)])
 
-        self.up_layers   = nn.ModuleList([PixelCNNLayer_up(nr_resnet, nr_filters,
-                                                self.resnet_nonlinearity) for _ in range(3)])
+        self.up_layers  = nn.ModuleList([PixelCNNLayer_up(nr_resnet, nr_filters,
+                                                                    self.resnet_nonlinearity) for _ in range(3)])
 
-        self.downsize_u_stream  = nn.ModuleList([down_shifted_conv2d(nr_filters, nr_filters,
-                                                    stride=(2,2)) for _ in range(2)])
+        self.downsize_u_stream = nn.ModuleList([down_shifted_conv2d(nr_filters, nr_filters,
+                                                                            stride=(2,2), norm='batch_norm') for _ in range(2)]) # Added batch norm
 
         self.downsize_ul_stream = nn.ModuleList([down_right_shifted_conv2d(nr_filters,
-                                                    nr_filters, stride=(2,2)) for _ in range(2)])
+                                                                                    nr_filters, stride=(2,2), norm='batch_norm') for _ in range(2)]) # Added batch norm
 
-        self.upsize_u_stream  = nn.ModuleList([down_shifted_deconv2d(nr_filters, nr_filters,
-                                                    stride=(2,2)) for _ in range(2)])
+        self.upsize_u_stream = nn.ModuleList([down_shifted_deconv2d(nr_filters, nr_filters,
+                                                                            stride=(2,2)) for _ in range(2)])
 
         self.upsize_ul_stream = nn.ModuleList([down_right_shifted_deconv2d(nr_filters,
-                                                    nr_filters, stride=(2,2)) for _ in range(2)])
+                                                                                    nr_filters, stride=(2,2)) for _ in range(2)])
 
         self.u_init = down_shifted_conv2d(input_channels + 1, nr_filters, filter_size=(2,3),
-                        shift_output_down=True)
+                                            shift_output_down=True, norm='batch_norm') # Added batch norm
 
         self.ul_init = nn.ModuleList([down_shifted_conv2d(input_channels + 1, nr_filters,
-                                            filter_size=(1,3), shift_output_down=True),
-                                       down_right_shifted_conv2d(input_channels + 1, nr_filters,
-                                            filter_size=(2,1), shift_output_right=True)])
+                                                                    filter_size=(1,3), shift_output_down=True, norm='batch_norm'), # Added batch norm
+                                        down_right_shifted_conv2d(input_channels + 1, nr_filters,
+                                                                    filter_size=(2,1), shift_output_right=True, norm='batch_norm')]) # Added batch norm
 
         num_mix = 3 if self.input_channels == 1 else 10
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Add the embedding layer for input embedding
-        self.input_embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
-        
-        # Add embedding layers for middle fusion
-        self.middle_embedding1 = nn.Embedding(num_classes, nr_filters)
-        self.middle_embedding2 = nn.Embedding(num_classes, nr_filters)
-        self.middle_embedding3 = nn.Embedding(num_classes, nr_filters)
-        
-        # Add projection layers for middle fusion
-        self.middle_proj1 = nin(num_classes, nr_filters)
-        self.middle_proj2 = nin(num_classes, nr_filters)
-        self.middle_proj3 = nin(num_classes, nr_filters)
+        # Add the embedding layer
+        self.embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
 
     # Add the embeddings to the input
     def addPositionalEmbedding(self, x, labels, img_height, img_width):
-        embs = self.input_embedding(labels).view(-1, self.input_channels, img_height, img_width)
+        embs = self.embedding(labels).view(-1, self.input_channels, img_height, img_width)
         return x + embs
-    
-    # Generate middle fusion embeddings
-    def getMiddleEmbedding(self, labels, level):
-        B = labels.size(0)
-        if level == 1:
-            return self.middle_embedding1(labels).view(B, self.nr_filters, 1, 1)
-        elif level == 2:
-            return self.middle_embedding2(labels).view(B, self.nr_filters, 1, 1)
-        elif level == 3:
-            return self.middle_embedding3(labels).view(B, self.nr_filters, 1, 1)
 
     def forward(self, x, labels, sample=False):
         _, _, H, W = x.size()
         labels = labels.to(x.device)
-        
-        # Apply input-level embedding
         x = self.addPositionalEmbedding(x, labels, H, W)
 
         # similar as done in the tf repo :
@@ -138,7 +121,7 @@ class PixelCNN(nn.Module):
             padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
             self.init_padding = padding.cuda() if x.is_cuda else padding
 
-        if sample:
+        if sample :
             xs = [int(y) for y in x.size()]
             padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
             padding = padding.cuda() if x.is_cuda else padding
@@ -146,43 +129,30 @@ class PixelCNN(nn.Module):
 
         ###      UP PASS    ###
         x = x if sample else torch.cat((x, self.init_padding), 1)
-        u_list  = [self.u_init(x)]
+        u_list = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
-        
         for i in range(3):
             # resnet block
             u_out, ul_out = self.up_layers[i](u_list[-1], ul_list[-1])
-            
-            # Apply middle fusion after each up layer
-            middle_emb = self.getMiddleEmbedding(labels, i+1)
-            for j in range(len(u_out)):
-                u_out[j] = u_out[j] + middle_emb
-                ul_out[j] = ul_out[j] + middle_emb
-                
-            u_list  += u_out
+            u_list += u_out
             ul_list += ul_out
 
             if i != 2:
                 # downscale (only twice)
-                u_list  += [self.downsize_u_stream[i](u_list[-1])]
+                u_list += [self.downsize_u_stream[i](u_list[-1])]
                 ul_list += [self.downsize_ul_stream[i](ul_list[-1])]
 
         ###    DOWN PASS    ###
-        u  = u_list.pop()
+        u = u_list.pop()
         ul = ul_list.pop()
 
         for i in range(3):
             # resnet block
             u, ul = self.down_layers[i](u, ul, u_list, ul_list)
-            
-            # Apply middle fusion after each down layer
-            middle_emb = self.getMiddleEmbedding(labels, 3-i)
-            u = u + middle_emb
-            ul = ul + middle_emb
 
             # upscale (only twice)
-            if i != 2:
-                u  = self.upsize_u_stream[i](u)
+            if i != 2 :
+                u = self.upsize_u_stream[i](u)
                 ul = self.upsize_ul_stream[i](ul)
 
         x_out = self.nin_out(F.elu(ul))
@@ -190,7 +160,7 @@ class PixelCNN(nn.Module):
         assert len(u_list) == len(ul_list) == 0, pdb.set_trace()
 
         return x_out
-    
+
     # Run model inference
     def infer_img(self, x, device):
         B, _, _, _ = x.size()
@@ -205,8 +175,8 @@ class PixelCNN(nn.Module):
 
         # Get the minimum loss and the corresponding label
         losses, labels = torch.min(inferred_loss, dim=0)
-        return losses, labels, inferred_loss
-    
+        return losses, labels
+
 class random_classifier(nn.Module):
     def __init__(self, NUM_CLASSES):
         super(random_classifier, self).__init__()
