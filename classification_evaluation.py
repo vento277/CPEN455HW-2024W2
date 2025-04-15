@@ -117,7 +117,7 @@ if __name__ == '__main__':
     #Write your code here
     #You should replace the random classifier with your trained model
     #Begin of your code
-    model = PixelCNN(nr_resnet=1, nr_filters=40, input_channels=3, nr_logistic_mix=10)
+    model = PixelCNN(nr_resnet=1, nr_filters=50, input_channels=3, nr_logistic_mix=10)
     #End of your code
     
     model = model.to(device)
@@ -126,6 +126,6 @@ if __name__ == '__main__':
     model.load_state_dict(torch.load('models/conditional_pixelcnn.pth'))
     model.eval()
     print('model parameters loaded')
-    classify(model = model, data_loader = dataloader, device = device, csv_test_file = './data/test.csv', csv_output_file_name = 'submission.csv', fid = 37.5056)
+    classify(model = model, data_loader = dataloader, device = device, csv_test_file = './data/test.csv', csv_output_file_name = 'submission.csv', fid = 42.66314711405764)
         
         
