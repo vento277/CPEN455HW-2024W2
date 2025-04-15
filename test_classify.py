@@ -1,5 +1,11 @@
-import csv
-import os
+'''
+This code is used to evaluate the classification accuracy of the trained model.
+You should at least guarantee this code can run without any error on validation set.
+And whether this code can run is the most important factor for grading.
+We provide the remaining code, all you should do are, and you can't modify the remaining code:
+1. Replace the random classifier with your trained model.(line 64-68)
+2. modify the get_label function to get the predicted label.(line 18-24)(just like Leetcode solutions)
+'''
 from torchvision import datasets, transforms
 from utils import *
 from model import * 
@@ -7,67 +13,56 @@ from dataset import *
 from tqdm import tqdm
 from pprint import pprint
 import argparse
-import torch
-
 NUM_CLASSES = len(my_bidict)
+import csv
+import os
 
-#TODO: Begin of your code
-# classification function to convert the output of conditional PixelCNN++ to the prediction labels when given a new image
-def classify(model, model_input, device):
-    batch_size = model_input.shape[0]
 
-    # replicate input for number of classes
-    model_input = model_input.repeat(NUM_CLASSES,1,1,1)
+def get_label_logits(model, model_input, device):
+    answer, logits = model.classify(model_input, len(my_bidict), logits=True)
+    return answer, logits
 
-    # lookup tensor of potential class labels that can be guessed for each image in the batch
-    batched_labels = torch.arange(NUM_CLASSES).repeat_interleave(batch_size)
+def classify_and_submit(model, data_loader, device):
+    rows = []
+    path = 'data/test'
+    full_answers = []
+    full_logits = torch.Tensor().to(device)
     
-    # generate output for each class label
-    model_out = model(model_input, batched_labels)
-
-    # choice of loss function was given from piazza/ TA office hours
-    logits = discretized_mix_logistic_loss(model_input, model_out, sum_over_batch=False).view(NUM_CLASSES, batch_size).permute(1, 0)
-    
-    # minimize logistic loss
-    losses, pred_labels = torch.min(logits, dim=1)
-
-    return logits, losses, pred_labels
-
-def get_label(model, model_input, device):
-    logits, losses, pred_labels = classify(model, model_input, device)
-    return pred_labels
-# End of your code
-
-def classifier(model, data_loader, device):
     model.eval()
-    acc_tracker = ratio_tracker()
-    # List to store predictions
-    all_preds = []
-    
     for batch_idx, item in enumerate(tqdm(data_loader)):
-        model_input, categories = item
-        model_input = model_input.to(device)
-        original_label = [my_bidict[item] for item in categories]
-        original_label = torch.tensor(original_label, dtype=torch.int64).to(device)
-        answer = get_label(model, model_input, device)
-        correct_num = torch.sum(answer == original_label)
-        acc_tracker.update(correct_num.item(), model_input.shape[0])
+        with torch.no_grad():
+            # model works in batches of 32
+            model_input, categories = item
+            model_input = model_input.to(device)
+            answer, logits = get_label_logits(model, model_input, device)
+
+            full_logits = torch.cat((full_logits, logits), 0)
+
+            answer = [pred.item() for pred in answer]
+            answer = [int(i) for i in answer]
+            full_answers.extend(answer)
+
+    torch.save(full_logits, 'test_logits.pt')
+
+    # Learned from https://www.geeksforgeeks.org/writing-csv-files-in-python/
+    fields = ['id', 'label']
+    fid = ['fid', '24.227917819822295']
+
+    filename = "submission.csv"
+
+    with open(filename, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile)
+
+        csvwriter.writerow(fields)
+
+        for _, _, filenames in os.walk(path, topdown=True):
+            # https://stackoverflow.com/questions/33159106/sort-filenames-in-directory-in-ascending-order
+            filenames.sort(key=lambda f: int(''.join(filter(str.isdigit, f))))
+            for i in range(0, len(filenames)):
+                csvwriter.writerow([filenames[i], str(full_answers[i])])
+
+        csvwriter.writerow(fid)
         
-        # Store predictions
-        all_preds.extend(answer.cpu().numpy().tolist())
-    
-    # Save to CSV
-    csv_path = os.path.join(os.path.dirname(__file__), 'classifier_results.csv')
-    with open(csv_path, 'w', newline='') as csvfile:
-        csv_writer = csv.writer(csvfile)
-        # Write relative path and predicted label, no header
-        for image_path, pred in zip(data_loader.dataset.samples, all_preds):
-            # Get path relative to root_dir (e.g., test/0000021.jpg)
-            img_path = os.path.relpath(image_path[0], start=data_loader.dataset.root_dir)
-            csv_writer.writerow([img_path, pred])
-    
-    print(f"Results saved to {csv_path}")
-    return acc_tracker.get_ratio()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -84,27 +79,24 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     kwargs = {'num_workers':0, 'pin_memory':True, 'drop_last':False}
 
+
     ds_transforms = transforms.Compose([transforms.Resize((32, 32)), rescaling])
     dataloader = torch.utils.data.DataLoader(CPEN455Dataset(root_dir=args.data_dir, 
-                                                            mode=args.mode, 
+                                                            mode = args.mode, 
                                                             transform=ds_transforms), 
                                              batch_size=args.batch_size, 
-                                             shuffle=True, 
+                                             shuffle=False, 
                                              **kwargs)
-    
-    dataset = CPEN455Dataset(root_dir=args.data_dir, mode=args.mode, transform=ds_transforms)
-    #TODO:Begin of your code
-    model = PixelCNN(nr_resnet=1, nr_filters=50, input_channels=3, nr_logistic_mix=5, num_classes=NUM_CLASSES)
-    #End of your code
 
-    model = model.to(device)
-    model_path = os.path.join(os.path.dirname(__file__), 'models/conditional_pixelcnn.pth')
-    if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path))
-        print('model parameters loaded')
-    else:
-        raise FileNotFoundError(f"Model file not found at {model_path}")
-    model.eval()
+    model = PixelCNN(nr_resnet=2, nr_filters=40, 
+            input_channels=3, nr_logistic_mix=5)
     
-    acc = classifier(model=model, data_loader=dataloader, device=device)
-    print(f"Accuracy: {acc}")
+    model = model.to(device)
+    #Attention: the path of the model is fixed to 'models/conditional_pixelcnn.pth'
+    #You should save your model to this path
+    model.load_state_dict(torch.load('models/conditional_pixelcnn.pth', map_location=device)) # MODIFICATION TO RUN ON CPU IF TRAINED ON GPU
+    model.eval()
+    print('model parameters loaded')
+    classify_and_submit(model = model, data_loader = dataloader, device = device)
+        
+        
