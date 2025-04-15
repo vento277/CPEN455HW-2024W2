@@ -26,17 +26,17 @@ class nin(nn.Module):
 
 class down_shifted_conv2d(nn.Module):
     def __init__(self, num_filters_in, num_filters_out, filter_size=(2,3), stride=(1,1),
-                    shift_output_down=False, norm='weight_norm'): # Added norm argument
+                    shift_output_down=False, norm='weight_norm'):
         super(down_shifted_conv2d, self).__init__()
 
         assert norm in [None, 'batch_norm', 'weight_norm']
         self.conv = nn.Conv2d(num_filters_in, num_filters_out, filter_size, stride)
         self.shift_output_down = shift_output_down
         self.norm = norm
-        self.pad = nn.ZeroPad2d((int((filter_size[1] - 1) / 2), # pad left
+        self.pad  = nn.ZeroPad2d((int((filter_size[1] - 1) / 2), # pad left
                                   int((filter_size[1] - 1) / 2), # pad right
-                                  filter_size[0] - 1,    # pad top
-                                  0) )  # pad down
+                                  filter_size[0] - 1,            # pad top
+                                  0) )                           # pad down
 
         if norm == 'weight_norm':
             self.conv = wn(self.conv)
@@ -54,25 +54,15 @@ class down_shifted_conv2d(nn.Module):
 
 
 class down_shifted_deconv2d(nn.Module):
-    def __init__(self, num_filters_in, num_filters_out, filter_size=(2,3), stride=(1,1), 
-                norm='weight_norm'): # Added norm parameter for consistency
+    def __init__(self, num_filters_in, num_filters_out, filter_size=(2,3), stride=(1,1)):
         super(down_shifted_deconv2d, self).__init__()
-        
-        self.deconv = nn.ConvTranspose2d(num_filters_in, num_filters_out, filter_size, stride,
-                                        output_padding=1)
-        self.norm = norm
+        self.deconv = wn(nn.ConvTranspose2d(num_filters_in, num_filters_out, filter_size, stride,
+                                            output_padding=1))
         self.filter_size = filter_size
         self.stride = stride
-        
-        if norm == 'weight_norm':
-            self.deconv = wn(self.deconv)
-        elif norm == 'batch_norm':
-            self.bn = nn.BatchNorm2d(num_filters_out)
 
     def forward(self, x):
         x = self.deconv(x)
-        if self.norm == 'batch_norm':
-            x = self.bn(x)
         xs = [int(y) for y in x.size()]
         return x[:, :, :(xs[2] - self.filter_size[0] + 1),
                  int((self.filter_size[1] - 1) / 2):(xs[3] - int((self.filter_size[1] - 1) / 2))]
@@ -80,7 +70,7 @@ class down_shifted_deconv2d(nn.Module):
 
 class down_right_shifted_conv2d(nn.Module):
     def __init__(self, num_filters_in, num_filters_out, filter_size=(2,2), stride=(1,1),
-                    shift_output_right=False, norm='weight_norm'): # Added norm argument
+                    shift_output_right=False, norm='weight_norm'):
         super(down_right_shifted_conv2d, self).__init__()
 
         assert norm in [None, 'batch_norm', 'weight_norm']
@@ -106,24 +96,15 @@ class down_right_shifted_conv2d(nn.Module):
 
 class down_right_shifted_deconv2d(nn.Module):
     def __init__(self, num_filters_in, num_filters_out, filter_size=(2,2), stride=(1,1),
-                    shift_output_right=False, norm='weight_norm'): # Added norm parameter
+                    shift_output_right=False):
         super(down_right_shifted_deconv2d, self).__init__()
-        
-        self.deconv = nn.ConvTranspose2d(num_filters_in, num_filters_out, filter_size,
-                                            stride, output_padding=1)
+        self.deconv = wn(nn.ConvTranspose2d(num_filters_in, num_filters_out, filter_size,
+                                                stride, output_padding=1))
         self.filter_size = filter_size
         self.stride = stride
-        self.norm = norm
-        
-        if norm == 'weight_norm':
-            self.deconv = wn(self.deconv)
-        elif norm == 'batch_norm':
-            self.bn = nn.BatchNorm2d(num_filters_out)
 
     def forward(self, x):
         x = self.deconv(x)
-        if self.norm == 'batch_norm':
-            x = self.bn(x)
         xs = [int(y) for y in x.size()]
         x = x[:, :, :(xs[2] - self.filter_size[0] + 1):, :(xs[3] - self.filter_size[1] + 1)]
         return x
@@ -146,17 +127,12 @@ class gated_resnet(nn.Module):
 
         self.dropout = nn.Dropout2d(0.5)
         self.conv_out = conv_op(2 * num_filters, 2 * num_filters)
-        
-        # Added fusion gate to control information flow
-        self.fusion_gate = nn.Parameter(torch.tensor(0.1))
+
 
     def forward(self, og_x, a=None):
         x = self.conv_input(self.nonlinearity(og_x))
         if a is not None :
-            # Modified to use fusion gate to control skip connection influence
-            skip_contribution = self.nin_skip(self.nonlinearity(a))
-            x = x + self.fusion_gate * skip_contribution
-            
+            x += self.nin_skip(self.nonlinearity(a))
         x = self.nonlinearity(x)
         x = self.dropout(x)
         x = self.conv_out(x)
