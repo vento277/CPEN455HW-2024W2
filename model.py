@@ -97,17 +97,39 @@ class PixelCNN(nn.Module):
         self.nin_out = nin(nr_filters, num_mix * nr_logistic_mix)
         self.init_padding = None
 
-        # Add the embedding layer
-        self.embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
+        # Add the embedding layer for input embedding
+        self.input_embedding = nn.Embedding(num_classes, input_channels * 32 * 32)
+        
+        # Add embedding layers for middle fusion
+        self.middle_embedding1 = nn.Embedding(num_classes, nr_filters)
+        self.middle_embedding2 = nn.Embedding(num_classes, nr_filters)
+        self.middle_embedding3 = nn.Embedding(num_classes, nr_filters)
+        
+        # Add projection layers for middle fusion
+        self.middle_proj1 = nin(num_classes, nr_filters)
+        self.middle_proj2 = nin(num_classes, nr_filters)
+        self.middle_proj3 = nin(num_classes, nr_filters)
 
     # Add the embeddings to the input
     def addPositionalEmbedding(self, x, labels, img_height, img_width):
-        embs = self.embedding(labels).view(-1, self.input_channels, img_height, img_width)
+        embs = self.input_embedding(labels).view(-1, self.input_channels, img_height, img_width)
         return x + embs
+    
+    # Generate middle fusion embeddings
+    def getMiddleEmbedding(self, labels, level):
+        B = labels.size(0)
+        if level == 1:
+            return self.middle_embedding1(labels).view(B, self.nr_filters, 1, 1)
+        elif level == 2:
+            return self.middle_embedding2(labels).view(B, self.nr_filters, 1, 1)
+        elif level == 3:
+            return self.middle_embedding3(labels).view(B, self.nr_filters, 1, 1)
 
     def forward(self, x, labels, sample=False):
         _, _, H, W = x.size()
         labels = labels.to(x.device)
+        
+        # Apply input-level embedding
         x = self.addPositionalEmbedding(x, labels, H, W)
 
         # similar as done in the tf repo :
@@ -116,7 +138,7 @@ class PixelCNN(nn.Module):
             padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
             self.init_padding = padding.cuda() if x.is_cuda else padding
 
-        if sample :
+        if sample:
             xs = [int(y) for y in x.size()]
             padding = Variable(torch.ones(xs[0], 1, xs[2], xs[3]), requires_grad=False)
             padding = padding.cuda() if x.is_cuda else padding
@@ -126,9 +148,17 @@ class PixelCNN(nn.Module):
         x = x if sample else torch.cat((x, self.init_padding), 1)
         u_list  = [self.u_init(x)]
         ul_list = [self.ul_init[0](x) + self.ul_init[1](x)]
+        
         for i in range(3):
             # resnet block
             u_out, ul_out = self.up_layers[i](u_list[-1], ul_list[-1])
+            
+            # Apply middle fusion after each up layer
+            middle_emb = self.getMiddleEmbedding(labels, i+1)
+            for j in range(len(u_out)):
+                u_out[j] = u_out[j] + middle_emb
+                ul_out[j] = ul_out[j] + middle_emb
+                
             u_list  += u_out
             ul_list += ul_out
 
@@ -144,9 +174,14 @@ class PixelCNN(nn.Module):
         for i in range(3):
             # resnet block
             u, ul = self.down_layers[i](u, ul, u_list, ul_list)
+            
+            # Apply middle fusion after each down layer
+            middle_emb = self.getMiddleEmbedding(labels, 3-i)
+            u = u + middle_emb
+            ul = ul + middle_emb
 
             # upscale (only twice)
-            if i != 2 :
+            if i != 2:
                 u  = self.upsize_u_stream[i](u)
                 ul = self.upsize_ul_stream[i](ul)
 
@@ -184,5 +219,3 @@ class random_classifier(nn.Module):
         torch.save(self.state_dict(), 'models/conditional_pixelcnn.pth')
     def forward(self, x, device):
         return torch.randint(0, self.NUM_CLASSES, (x.shape[0],)).to(device)
-    
-    
