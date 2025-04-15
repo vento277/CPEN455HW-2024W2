@@ -13,29 +13,10 @@ NUM_CLASSES = len(my_bidict)
 
 #TODO: Begin of your code
 # classification function to convert the output of conditional PixelCNN++ to the prediction labels when given a new image
-def classify(model, model_input, device):
-    batch_size = model_input.shape[0]
-
-    # replicate input for number of classes
-    model_input = model_input.repeat(NUM_CLASSES,1,1,1)
-
-    # lookup tensor of potential class labels that can be guessed for each image in the batch
-    batched_labels = torch.arange(NUM_CLASSES).repeat_interleave(batch_size)
-    
-    # generate output for each class label
-    model_out = model(model_input, batched_labels)
-
-    # choice of loss function was given from piazza/ TA office hours
-    logits = discretized_mix_logistic_loss(model_input, model_out, sum_over_batch=False).view(NUM_CLASSES, batch_size).permute(1, 0)
-    
-    # minimize logistic loss
-    losses, pred_labels = torch.min(logits, dim=1)
-
-    return logits, losses, pred_labels
-
+# Begin of your code
 def get_label(model, model_input, device):
-    logits, losses, pred_labels = classify(model, model_input, device)
-    return pred_labels
+    _, labels, _ = model.infer_img(model_input, device)
+    return labels
 # End of your code
 
 def classifier(model, data_loader, device):
@@ -98,6 +79,8 @@ if __name__ == '__main__':
     #End of your code
 
     model = model.to(device)
+    #Attention: the path of the model is fixed to './models/conditional_pixelcnn.pth'
+    #You should save your model to this path
     model_path = os.path.join(os.path.dirname(__file__), 'models/conditional_pixelcnn.pth')
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path))
@@ -106,5 +89,5 @@ if __name__ == '__main__':
         raise FileNotFoundError(f"Model file not found at {model_path}")
     model.eval()
     
-    acc = classifier(model=model, data_loader=dataloader, device=device)
+    acc = classifier(model = model, data_loader = dataloader, device = device)
     print(f"Accuracy: {acc}")
