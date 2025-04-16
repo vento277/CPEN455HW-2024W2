@@ -1,10 +1,5 @@
 '''
-This code is used to evaluate the classification accuracy of the trained model.
-You should at least guarantee this code can run without any error on validation set.
-And whether this code can run is the most important factor for grading.
-We provide the remaining code, all you should do are, and you can't modify the remaining code:
-1. Replace the random classifier with your trained model.(line 64-68)
-2. modify the get_label function to get the predicted label.(line 18-24)(just like Leetcode solutions)
+This code is to output csv file. Not involoved in submission for the project.
 '''
 from torchvision import datasets, transforms
 import numpy as np
@@ -122,6 +117,6 @@ if __name__ == '__main__':
     model.load_state_dict(torch.load('models/conditional_pixelcnn.pth'))
     model.eval()
     print('model parameters loaded')
-    classify(model = model, data_loader = dataloader, device = device, csv_test_file = './data/test.csv', csv_output_file_name = 'submission.csv', fid = 43.45358759351416)
+    classify(model = model, data_loader = dataloader, device = device, csv_test_file = './data/test.csv', csv_output_file_name = 'submission.csv', fid = 19.69229416733146)
         
         
